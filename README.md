@@ -6,7 +6,9 @@
 again — your words are typed into whatever window has focus. 100% on-device:
 audio never leaves your machine.
 
+[![PyPI](https://img.shields.io/pypi/v/parlando)](https://pypi.org/project/parlando/)
 [![Tests](https://github.com/furkanc/parlando/actions/workflows/tests.yml/badge.svg)](https://github.com/furkanc/parlando/actions/workflows/tests.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
 ## Features
 
@@ -38,38 +40,58 @@ audio never leaves your machine.
 - [`uv`](https://docs.astral.sh/uv/) installed
 - ~2 GB disk for the default ASR model (downloaded once from Hugging Face)
 
-## Install
+## Installation
 
-One-liner (installs [`uv`](https://docs.astral.sh/uv/) if needed, puts
-`parlando` on your PATH):
+parlando is on [PyPI](https://pypi.org/project/parlando/). With
+[`uv`](https://docs.astral.sh/uv/) (recommended):
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/furkanc/parlando/main/install.sh | sh
+uv tool install parlando     # installs the parlando & parlando-menubar commands
 ```
 
-Then:
+or try it without installing anything permanent:
+
+```bash
+uvx parlando
+```
+
+or with pipx / pip:
+
+```bash
+pipx install parlando        # isolated install, commands on PATH
+pip install parlando         # into your current Python environment
+```
+
+<details>
+<summary>Other ways: one-line installer · from source · uninstall</summary>
+
+```bash
+# one-liner that also installs uv if you don't have it
+curl -fsSL https://raw.githubusercontent.com/furkanc/parlando/main/install.sh | sh
+
+# from source
+git clone https://github.com/furkanc/parlando && cd parlando
+uv run parlando              # run without installing
+uv tool install .            # install commands from the checkout
+
+# uninstall
+uv tool uninstall parlando   # (or: pipx uninstall parlando / pip uninstall parlando)
+```
+</details>
+
+## Quick start
 
 ```bash
 parlando            # terminal
 parlando-menubar    # menu bar app
 ```
 
-Click the window you want to type into → tap **right ⌥ Option** → speak →
-tap again. Your words appear at the cursor. The speech model (~1-2 GB)
-downloads once on first run; after that everything is offline.
-
-<details>
-<summary>Run from source / uninstall</summary>
-
-```bash
-git clone https://github.com/furkanc/parlando && cd parlando
-uv run parlando              # run without installing
-uv tool install .           # or install the commands from the checkout
-
-# uninstall
-uv tool uninstall parlando
-```
-</details>
+1. On first run the speech model (~2 GB) downloads once; after that
+   everything works offline.
+2. macOS will ask for **Microphone** and **Accessibility** permissions
+   (see below) — grant them and restart parlando.
+3. Click the window you want to type into → tap **right ⌥ Option** →
+   speak → tap again. Your words appear at the cursor.
 
 ### Permissions (one-time)
 
