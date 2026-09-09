@@ -26,8 +26,8 @@ audio never leaves your machine.
   contextual fillers ("you know", "yani"), stutters and false starts, and
   fixes punctuation — guarded so it can only *edit* your words, never
   answer them.
-- **Menu bar app** — 🎤 icon with start/stop, language switcher, and
-  start-at-login support.
+- **Menu bar app** — a native template icon (waveform ▸ recording dot ▸
+  pause) with start/stop, language switcher, and start-at-login support.
 - **Self-healing** — audio watchdog survives sleep/wake and device changes;
   inference errors never kill the session.
 - **Streaming mode (optional)** — words appear as you speak, stabilized with
