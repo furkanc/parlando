@@ -206,3 +206,6 @@ marimo/_static/
 marimo/_lsp/
 __marimo__/
 .idea
+# code-signing exports (scripts/make_signing_cert.sh --export)
+*.p12
+.DS_Store
