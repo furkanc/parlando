@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.4.2 — 2026-09-09
+
+- **`parlando` opens the menu bar app.** The terminal mode moved behind
+  `--terminal` / `-t` (implied by `--pipe`); terminal-only options given
+  without it are rejected with a hint instead of being ignored.
+  `--install-login` / `--uninstall-login` work on the main command and the
+  login item now runs `parlando`. `parlando-menubar` stays as an alias.
+- **Turkish is the default language** (`--language English` for English).
+  Voice commands and filler cleanup follow the language; the menu bar
+  badge now marks a non-default language (ᵉⁿ) instead of Turkish.
+
 ## 0.4.1 — 2026-09-09
 
 - README images now use absolute URLs so the banner and menu bar icon

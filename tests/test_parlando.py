@@ -223,7 +223,7 @@ def test_finalize_types_and_separates():
 
 
 def test_finalize_send_presses_enter():
-    eng = _speech_engine(asr_text="do this send")
+    eng = _speech_engine(vt.Config(mode="stream", language="English"), "do this send")
     asyncio.new_event_loop().run_until_complete(eng._finalize())
     assert eng.typist.out == ["do this", "<ENTER>"]
 
@@ -368,7 +368,7 @@ def test_split_audio_short_passthrough():
 
 def test_record_send_presses_enter(monkeypatch):
     monkeypatch.setattr(subprocess, "Popen", lambda *a, **k: None)
-    eng = vt.DictationEngine(vt.Config(mode="record"))
+    eng = vt.DictationEngine(vt.Config(mode="record", language="English"))
     eng.typist = FakeTypist()
 
     async def fake_asr(_a):
@@ -381,6 +381,25 @@ def test_record_send_presses_enter(monkeypatch):
     eng.toggle_action()
     asyncio.new_event_loop().run_until_complete(eng._finalize_record())
     assert eng.typist.out == ["write this to claude", "<ENTER>"]
+
+
+def test_default_language_is_turkish(monkeypatch):
+    """Default config dictates Turkish: Turkish fillers and commands apply."""
+    assert vt.Config().language == "Turkish"
+    monkeypatch.setattr(subprocess, "Popen", lambda *a, **k: None)
+    eng = vt.DictationEngine(vt.Config(mode="record"))
+    eng.typist = FakeTypist()
+
+    async def fake_asr(_a):
+        return "eee bunu yaz gönder"
+
+    eng._asr = fake_asr
+    eng.toggle_action()
+    for _ in range(50):
+        eng._on_frame(np.ones(480, np.int16) * 1000)
+    eng.toggle_action()
+    asyncio.new_event_loop().run_until_complete(eng._finalize_record())
+    assert eng.typist.out == ["bunu yaz", "<ENTER>"]
 
 
 # -----------------------------------------------------------------------------
@@ -481,3 +500,51 @@ def test_clean_words_cleanup_can_be_disabled():
 def test_polish_disabled_by_default():
     eng = vt.DictationEngine(vt.Config())
     assert eng.cfg.polish is False and eng.llm is None
+
+
+# -----------------------------------------------------------------------------
+# CLI entry: plain `parlando` is the menu bar app, --terminal is the CLI
+# -----------------------------------------------------------------------------
+
+
+def test_cli_default_opens_menubar(monkeypatch):
+    from parlando import menubar
+
+    calls = []
+    monkeypatch.setattr(menubar, "run_menubar", lambda: calls.append("menubar") or 0)
+    monkeypatch.setattr(sys, "argv", ["parlando"])
+    assert vt.main() == 0 and calls == ["menubar"]
+
+
+def test_cli_login_flags_dispatch(monkeypatch):
+    from parlando import menubar
+
+    calls = []
+    monkeypatch.setattr(menubar, "install_login", lambda: calls.append("install") or 0)
+    monkeypatch.setattr(menubar, "uninstall_login", lambda: calls.append("uninstall") or 0)
+    monkeypatch.setattr(sys, "argv", ["parlando", "--install-login"])
+    assert vt.main() == 0
+    monkeypatch.setattr(sys, "argv", ["parlando", "--uninstall-login"])
+    assert vt.main() == 0
+    assert calls == ["install", "uninstall"]
+
+
+def test_cli_terminal_options_require_terminal_flag(monkeypatch):
+    from parlando import menubar
+
+    monkeypatch.setattr(menubar, "run_menubar", lambda: pytest.fail("must not open"))
+    monkeypatch.setattr(sys, "argv", ["parlando", "--language", "Turkish", "--polish"])
+    with pytest.raises(SystemExit) as exc:
+        vt.main()
+    assert exc.value.code == 2
+
+
+def test_terminal_options_given_and_wants_terminal():
+    parser = vt.build_arg_parser()
+    args = parser.parse_args([])
+    assert vt.terminal_options_given(parser, args) == [] and not vt.wants_terminal(args)
+    args = parser.parse_args(["--pipe"])
+    assert vt.terminal_options_given(parser, args) == [] and vt.wants_terminal(args)
+    args = parser.parse_args(["-t", "--language", "English", "--polish", "--hotkey", "alt_r"])
+    assert vt.wants_terminal(args)
+    assert vt.terminal_options_given(parser, args) == ["--language", "--polish"]

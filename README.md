@@ -18,11 +18,11 @@ audio never leaves your machine.
   (the same pattern superwhisper and Wispr Flow use). No always-on mic.
 - **Types anywhere** — text is delivered as native keyboard events (Quartz
   CGEvent unicode), so it works in any app, editor, terminal, or chat box.
-- **30 languages** — English by default; switch instantly (e.g. `--language
-  Turkish`) with no model reload.
-- **Voice commands** — "period", "comma", "question mark", "new line",
-  "send" (presses Enter). A Turkish command set activates with
-  `--language Turkish`.
+- **30 languages** — Turkish by default; switch instantly (e.g. `--language
+  English`) with no model reload.
+- **Voice commands** — "nokta", "virgül", "soru işareti", "yeni satır",
+  "gönder" (presses Enter); the English set ("period", "comma", "question
+  mark", "new line", "send") is active with `--language English`.
 - **Cleanup & polish** — vocalized fillers ("um", "uh", "eee") are removed
   automatically; optional `--polish` runs a small local LLM that drops
   contextual fillers ("you know", "yani"), stutters and false starts, and
@@ -46,7 +46,7 @@ parlando is on [PyPI](https://pypi.org/project/parlando/). With
 [`uv`](https://docs.astral.sh/uv/) (recommended):
 
 ```bash
-uv tool install parlando     # installs the parlando & parlando-menubar commands
+uv tool install parlando     # puts the parlando command on your PATH
 ```
 
 or try it without installing anything permanent:
@@ -82,8 +82,8 @@ uv tool uninstall parlando   # (or: pipx uninstall parlando / pip uninstall parl
 ## Quick start
 
 ```bash
-parlando            # terminal
-parlando-menubar    # menu bar app
+parlando            # menu bar app: icon top right, settings in its menu
+parlando --terminal # ...or dictate from this terminal window
 ```
 
 1. On first run the speech model (~2 GB) downloads once; after that
@@ -109,14 +109,16 @@ failing silently.
 ## Usage
 
 ```bash
-parlando --language Turkish   # dictate in another language
-parlando --polish             # LLM cleanup (fillers, false starts, punctuation)
-parlando --enter              # press Enter after each utterance
-parlando --mode stream        # live word-by-word streaming
-parlando --pipe               # print to stdout (scriptable)
-parlando --hotkey cmd_r       # tap right Command instead
-parlando --list-devices       # list microphones
-parlando-menubar --install-login   # start at login
+parlando                      # menu bar app (default)
+parlando --install-login      # start the menu bar app at login
+parlando --terminal           # dictate from the terminal; the options below need it
+parlando -t --language English   # dictate in another language
+parlando -t --polish             # LLM cleanup (fillers, false starts, punctuation)
+parlando -t --enter              # press Enter after each utterance
+parlando -t --mode stream        # live word-by-word streaming
+parlando --pipe                  # print to stdout (scriptable; implies --terminal)
+parlando -t --hotkey cmd_r       # tap right Command instead
+parlando --list-devices          # list microphones
 ```
 
 ### Voice commands
@@ -151,7 +153,7 @@ Disable with `--no-commands`.
 | `mlx-community/Qwen3-0.6B-4bit` | ~350 MB | — | ~0.2 s | minimal RAM, weakest cleanup |
 
 ```bash
-parlando --polish --polish-model mlx-community/Qwen3-4B-4bit
+parlando -t --polish --polish-model mlx-community/Qwen3-4B-4bit
 ```
 
 All models download once from Hugging Face and are cached in
@@ -222,8 +224,9 @@ uv run scripts/eval_polish.py      # polish quality benchmark (real local LLM)
 uv build                           # build the wheel/sdist
 ```
 
-Package layout: `src/parlando/` (engine, menubar, ASR engine), entry points
-`parlando` and `parlando-menubar`. CI runs the test suite and a packaging
+Package layout: `src/parlando/` (engine, menubar, ASR engine). Entry point
+`parlando` (menu bar app by default, `--terminal` for the CLI);
+`parlando-menubar` is kept as an alias. CI runs the test suite and a packaging
 build on macOS via GitHub Actions.
 
 ## Roadmap

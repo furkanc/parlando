@@ -4,13 +4,14 @@ Runs the dictation engine in the background; the menu bar offers start/stop,
 language switching, Enter mode and quit. No terminal window needed.
 
 Usage:
-    parlando-menubar                 # start in the menu bar
-    parlando-menubar --install-login # auto-start at login
-    parlando-menubar --uninstall-login
+    parlando                   # start in the menu bar (the default of `parlando`)
+    parlando --install-login   # auto-start at login
+    parlando --uninstall-login
+    parlando-menubar           # same app; kept as an alias
 
 Menu bar icon (template, adapts to light/dark): outline mic = ready,
-filled mic = recording, slashed mic = paused; a small "ᵗʳ" badge appears
-when the language is Turkish. The global hotkey works too (default:
+filled mic = recording, slashed mic = paused; a small badge (ᵉⁿ / ᵗʳ)
+appears when the language is not the default (Turkish). The global hotkey works too (default:
 single tap of right Option).
 """
 
@@ -29,9 +30,12 @@ from parlando import engine
 LAUNCH_AGENT = Path.home() / "Library" / "LaunchAgents" / "com.parlando.menubar.plist"
 
 LANGUAGES = {
-    "English": "English",
     "Türkçe": "Turkish",
+    "English": "English",
 }
+# Superscript badge shown next to the icon when the language is not the
+# default (Config.language).
+LANGUAGE_BADGES = {"Turkish": "ᵗʳ", "English": "ᵉⁿ"}
 
 # Template icons (black + alpha): macOS recolors them to match the menu bar
 # in light and dark mode. Regenerate with scripts/make_icons.py.
@@ -49,10 +53,11 @@ ICONS = {
 
 
 def install_login() -> int:
-    exe = shutil.which("parlando-menubar")
+    # Plain `parlando` opens the menu bar app; the old alias still works.
+    exe = shutil.which("parlando") or shutil.which("parlando-menubar")
     if not exe:
         print(
-            "error: 'parlando-menubar' not found in PATH; install parlando first",
+            "error: 'parlando' not found in PATH; install parlando first",
             file=sys.stderr,
         )
         return 1
@@ -136,8 +141,12 @@ def run_menubar() -> int:
                 return
             for lang, item in self.lang_items.items():
                 item.state = int(eng.cfg.language == lang)
-            # Small text badge next to the icon for non-default language.
-            badge = "" if eng.cfg.language == "English" else "ᵗʳ"
+            # Small text badge next to the icon for a non-default language.
+            badge = (
+                ""
+                if eng.cfg.language == engine.Config.language
+                else LANGUAGE_BADGES.get(eng.cfg.language, "")
+            )
             if self.title != badge:
                 self.title = badge
             if eng.cfg.mode == "record":

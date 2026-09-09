@@ -24,18 +24,21 @@ Design (dictation best practices):
     fillers and false starts, guarded so it can only *edit*, never answer.
 
 Usage:
-    parlando                    # listen and type into the focused window
-    parlando --language Turkish # dictate in another language
-    parlando --enter            # press Enter after each utterance
-    parlando --pipe             # print to stdout instead of typing
-    parlando --polish           # LLM cleanup of fillers and false starts
-    parlando --silero           # hybrid Silero VAD (noisy rooms)
+    parlando                    # menu bar app: icon top right, settings in its menu
+    parlando --install-login    # start the menu bar app at login
+    parlando --terminal         # dictate from this terminal window instead
+    parlando -t --language English  # terminal options (all need --terminal / -t)
+    parlando -t --enter         # press Enter after each utterance
+    parlando --pipe             # print to stdout instead of typing (implies -t)
+    parlando -t --polish        # LLM cleanup of fillers and false starts
+    parlando -t --silero        # hybrid Silero VAD (noisy rooms)
     parlando --list-devices     # list input devices
 
 Global hotkey (default: single tap of right Option): start/stop recording.
 
-Voice commands (disable with --no-commands), English shown; a Turkish set is
-active when --language Turkish:
+Voice commands (disable with --no-commands) follow the language: the Turkish
+set is active by default ("nokta", "virgül", "soru işareti", "yeni satır",
+"gönder"); the English set below is active with --language English:
     "period" "comma" "exclamation mark"  -> append . , ! to previous word
     "question mark"                      -> append ? to previous word
     "new line" / "new paragraph"         -> line break
@@ -90,7 +93,7 @@ LOGGER = logging.getLogger("parlando")
 @dataclass
 class Config:
     model: str = "mlx-community/Qwen3-ASR-1.7B-8bit"
-    language: str = "English"
+    language: str = "Turkish"
     device: int | None = None
     interval: float = 0.5        # partial ASR cadence (s), stream mode
     silence_ms: int = 500        # silence that ends an utterance, stream mode
@@ -1298,53 +1301,85 @@ def build_arg_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="parlando",
         description="Local voice dictation: speak, and the text is typed "
-                    "into the focused window.",
+                    "into the focused window. Without options this opens "
+                    "the menu bar app (icon top right, settings in its menu); "
+                    "with --terminal it dictates from this terminal window, "
+                    "configured by the options below.",
     )
     p.add_argument("--version", action="version", version=f"parlando {__version__}")
-    p.add_argument("--mode", choices=["record", "stream"], default=Config.mode,
+    p.add_argument("--terminal", "-t", action="store_true",
+                   help="Dictate from this terminal instead of the menu bar "
+                        "(status here, Ctrl+C to quit). Implied by --pipe.")
+    p.add_argument("--install-login", action="store_true",
+                   help="Start the menu bar app at login (LaunchAgent), then exit")
+    p.add_argument("--uninstall-login", action="store_true",
+                   help="Remove the login item, then exit")
+    p.add_argument("--list-devices", action="store_true", help="List input devices")
+    g = p.add_argument_group(
+        "terminal mode options",
+        "Only with --terminal (or --pipe); the menu bar app takes its "
+        "settings from its menu.",
+    )
+    p.terminal_group = g
+    g.add_argument("--mode", choices=["record", "stream"], default=Config.mode,
                    help="record: tap-speak-tap, typed in one go (default, most "
                         "robust). stream: always listening, word by word.")
-    p.add_argument("--model", default=Config.model, help="ASR model")
-    p.add_argument("--language", default=Config.language,
-                   help="Language (default: English; e.g. Turkish, German)")
-    p.add_argument("--device", type=int, default=None, help="Input device index")
-    p.add_argument("--interval", type=float, default=Config.interval,
+    g.add_argument("--model", default=Config.model, help="ASR model")
+    g.add_argument("--language", default=Config.language,
+                   help=f"Language (default: {Config.language}; e.g. English, German)")
+    g.add_argument("--device", type=int, default=None, help="Input device index")
+    g.add_argument("--interval", type=float, default=Config.interval,
                    help="Partial ASR cadence in seconds, stream mode "
                         "(default: 0.5)")
-    p.add_argument("--silence-ms", type=int, default=Config.silence_ms,
+    g.add_argument("--silence-ms", type=int, default=Config.silence_ms,
                    help="Silence that ends an utterance in stream mode, ms "
                         "(default: 500)")
-    p.add_argument("--energy-floor", type=float, default=Config.energy_floor,
+    g.add_argument("--energy-floor", type=float, default=Config.energy_floor,
                    help="Minimum RMS threshold (default: 0.004)")
-    p.add_argument("--max-utterance", type=float, default=Config.max_utterance_s,
+    g.add_argument("--max-utterance", type=float, default=Config.max_utterance_s,
                    help="Maximum utterance length in stream mode, seconds "
                         "(default: 20)")
-    p.add_argument("--no-normalize", action="store_true",
+    g.add_argument("--no-normalize", action="store_true",
                    help="Disable low-level microphone compensation")
-    p.add_argument("--enter", action="store_true",
+    g.add_argument("--enter", action="store_true",
                    help="Press Return after each utterance")
-    p.add_argument("--pipe", action="store_true",
+    g.add_argument("--pipe", action="store_true",
                    help="Do not type; print utterances to stdout")
-    p.add_argument("--hotkey", default=Config.hotkey,
+    g.add_argument("--hotkey", default=Config.hotkey,
                    help="Hotkey. A single key name (alt_r/cmd_r/ctrl_r/shift_r) "
                         "means single tap; combos like '<ctrl>+<alt>+d' also "
                         "work (default: alt_r = tap right Option)")
-    p.add_argument("--no-hotkey", action="store_true", help="Disable the hotkey")
-    p.add_argument("--no-commands", action="store_true",
+    g.add_argument("--no-hotkey", action="store_true", help="Disable the hotkey")
+    g.add_argument("--no-commands", action="store_true",
                    help="Disable voice commands (period, new line, send)")
-    p.add_argument("--no-cleanup", action="store_true",
+    g.add_argument("--no-cleanup", action="store_true",
                    help="Keep vocalized fillers (um, uh, eee) in the output")
-    p.add_argument("--polish", action="store_true",
+    g.add_argument("--polish", action="store_true",
                    help="LLM cleanup at finalize: removes contextual fillers "
                         "and false starts, fixes punctuation (record mode)")
-    p.add_argument("--polish-model", default=Config.polish_model,
+    g.add_argument("--polish-model", default=Config.polish_model,
                    help=f"Polish LLM (default: {Config.polish_model})")
-    p.add_argument("--silero", action="store_true",
+    g.add_argument("--silero", action="store_true",
                    help="Hybrid Silero VAD (for noisy environments)")
-    p.add_argument("--paused", action="store_true",
+    g.add_argument("--paused", action="store_true",
                    help="Start paused (resume with the hotkey)")
-    p.add_argument("--list-devices", action="store_true", help="List input devices")
     return p
+
+
+def terminal_options_given(parser: argparse.ArgumentParser,
+                           args: argparse.Namespace) -> list[str]:
+    """Terminal-mode options (except --pipe) that differ from their defaults."""
+    given = []
+    for action in parser.terminal_group._group_actions:
+        if action.dest == "pipe":
+            continue
+        if getattr(args, action.dest, action.default) != action.default:
+            given.append(action.option_strings[0])
+    return given
+
+
+def wants_terminal(args: argparse.Namespace) -> bool:
+    return bool(args.terminal or args.pipe)
 
 
 def list_devices() -> None:
@@ -1382,10 +1417,28 @@ def config_from_args(args: argparse.Namespace) -> Config:
 
 
 def main() -> int:
-    args = build_arg_parser().parse_args()
+    parser = build_arg_parser()
+    args = parser.parse_args()
     if args.list_devices:
         list_devices()
         return 0
+
+    from parlando import menubar  # lazy: the engine stays importable alone
+
+    if args.install_login:
+        return menubar.install_login()
+    if args.uninstall_login:
+        return menubar.uninstall_login()
+    if not wants_terminal(args):
+        given = terminal_options_given(parser, args)
+        if given:
+            parser.error(
+                f"{', '.join(given)}: terminal option(s) given without "
+                "--terminal. The menu bar app takes its settings from its "
+                "menu; add --terminal (-t) to dictate from this window with "
+                "these options."
+            )
+        return menubar.run_menubar()
 
     _setup_logging()
     LOGGER.info("parlando %s starting: %s", __version__, vars(args))
