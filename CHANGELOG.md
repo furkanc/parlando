@@ -4,7 +4,7 @@
 
 - **`Parlando.app`**: `parlando --install-app` generates a thin,
   ad-hoc signed app bundle in `~/Applications` (Info.plist, app icon, a
-  prebuilt Mach-O stub that execs a launch script for the installed
+  prebuilt Mach-O stub that runs a launch script for the installed
   package). Launched from Finder/Spotlight or the login item, Microphone
   and Accessibility permissions are requested and stored as "Parlando"
   instead of the terminal that happened to start it. `--uninstall-app`
@@ -12,10 +12,32 @@
 - Accessibility check now triggers the macOS prompt itself
   (`AXIsProcessTrustedWithOptions`) and the warning states that the
   hotkey is silent without the permission, not only typing. The menu bar
-  app shows this as a dialog.
+  app shows this as a dialog. While the permission is missing parlando
+  re-checks every 2 s and, once granted, re-creates the hotkey listener
+  itself: no restart after flipping the switch. macOS may terminate the
+  app at that moment; while the permission is missing, `Parlando.app`
+  arms a launchd relaunch guard that reopens it automatically (removed on
+  a normal quit and once the permission is in place).
 - New macOS app icon (`Parlando.icns`, `assets/app-icon.png`) from
   `scripts/make_icons.py`; `scripts/launcher.c` + `build_launcher.sh`
   for the stub.
+- **Status in the menu bar.** The menu opens with a status block: what
+  parlando is doing (starting, downloading the model with percentage and
+  size, loading, ready, recording with elapsed seconds, transcribing,
+  paused), a hint line, and, when something needs you, a one-click "Open
+  … settings" line. A small badge next to the icon shows it without
+  opening the menu (`52%`, `…`, `!`, `✎`). Model downloads now report
+  progress in the terminal too. Recording is disabled until ready.
+- The microphone check is recoverable: a silent mic shows as a problem,
+  the audio stream is reopened every 5 s so a permission granted after
+  start is picked up, and the first real audio clears it.
+- Requires Python 3.11+ (`onnxruntime` no longer ships 3.10 wheels);
+  `install.sh` installs from PyPI; `ruff` configured and run in CI.
+- Experimental `scripts/build_app.sh`: a self-contained `Parlando.app` +
+  `.dmg` with a relocatable CPython and all dependencies embedded (~250 MB
+  compressed; the ASR model still downloads on first run), plus
+  `scripts/make_signing_cert.sh` for a stable self-signed signing identity.
+  Not the supported distribution: install with `uv` (see README).
 
 ## 0.4.2 — 2026-09-09
 

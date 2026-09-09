@@ -7,7 +7,7 @@ name = "parlando"
 dynamic = ["version"]
 description = "Local voice dictation for macOS (Apple Silicon): tap a key, speak, and your words are typed into any app. 100% on-device."
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 license = "MIT"
 license-files = ["LICENSE"]
 authors = [{ name = "Furkan Can" }]
@@ -27,6 +27,9 @@ classifiers = [
     "Intended Audience :: End Users/Desktop",
     "Operating System :: MacOS",
     "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "Topic :: Multimedia :: Sound/Audio :: Speech",
 ]
 dependencies = [
@@ -54,6 +57,16 @@ Changelog = "https://github.com/furkanc/parlando/blob/main/CHANGELOG.md"
 [project.scripts]
 parlando = "parlando.engine:main"
 parlando-menubar = "parlando.menubar:main"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+# stt.py is vendored from dictate.sh (see README credits); keep its diff small.
+extend-exclude = ["src/parlando/stt.py"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "B", "UP", "I"]
+ignore = ["E501"]  # long lines: docstrings/tables; the formatter is not enforced
 
 [tool.hatch.version]
 path = "src/parlando/__init__.py"

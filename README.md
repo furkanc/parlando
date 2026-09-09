@@ -28,7 +28,14 @@ audio never leaves your machine.
   contextual fillers ("you know", "yani"), stutters and false starts, and
   fixes punctuation — guarded so it can only *edit* your words, never
   answer them.
-- **Menu bar app** — <img src="https://raw.githubusercontent.com/furkanc/parlando/main/assets/menubar-states.png" alt="menu bar icon states: idle, recording, paused" height="26" align="top"> (idle · recording · paused) with start/stop, language switcher, and start-at-login support. `--install-app` creates a real `Parlando.app` <img src="https://raw.githubusercontent.com/furkanc/parlando/main/assets/app-icon.png" alt="Parlando app icon" height="22" align="top"> so macOS permissions belong to Parlando, not to your terminal.
+- **Menu bar app** — <img src="https://raw.githubusercontent.com/furkanc/parlando/main/assets/menubar-states.png" alt="menu bar icon states: idle, recording, paused" height="26" align="top"> (idle · recording · paused) with start/stop, language
+  switcher, start-at-login, and a live status block: model download
+  progress, ready / recording / transcribing, and permission problems with
+  a one-click fix.
+- **A real app** — `parlando --install-app` creates `Parlando.app`
+  <img src="https://raw.githubusercontent.com/furkanc/parlando/main/assets/app-icon.png" alt="Parlando app icon" height="22" align="top">
+  so macOS asks for permissions in Parlando's name (not your terminal's) and
+  keeps them across upgrades.
 - **Self-healing** — audio watchdog survives sleep/wake and device changes;
   inference errors never kill the session.
 - **Streaming mode (optional)** — words appear as you speak, stabilized with
@@ -47,6 +54,7 @@ parlando is on [PyPI](https://pypi.org/project/parlando/). With
 
 ```bash
 uv tool install parlando     # puts the parlando command on your PATH
+parlando --install-app       # creates ~/Applications/Parlando.app (see Permissions)
 ```
 
 or try it without installing anything permanent:
@@ -82,14 +90,19 @@ uv tool uninstall parlando   # (or: pipx uninstall parlando / pip uninstall parl
 ## Quick start
 
 ```bash
-parlando            # menu bar app: icon top right, settings in its menu
-parlando --terminal # ...or dictate from this terminal window
+parlando                 # menu bar app: icon top right, settings in its menu
+parlando --terminal      # ...or dictate from this terminal window
 ```
+
+After `parlando --install-app`, open **Parlando** from Spotlight or
+`~/Applications` like any other app; permissions are then asked in
+Parlando's name instead of your terminal's, and stay granted across
+`uv tool upgrade parlando`.
 
 1. On first run the speech model (~2 GB) downloads once; after that
    everything works offline.
 2. macOS will ask for **Microphone** and **Accessibility** permissions
-   (see below) — grant them and restart parlando.
+   (see below) — grant them; parlando picks them up by itself.
 3. Click the window you want to type into → tap **right ⌥ Option** →
    speak → tap again. Your words appear at the cursor.
 
@@ -109,18 +122,25 @@ working whichever terminal you use.
 parlando triggers the system prompts itself, detects missing permissions and
 says so explicitly (in the terminal, or in a dialog from the menu bar app)
 instead of failing silently. Without Accessibility the hotkey is not heard at
-all. After granting a permission, quit and reopen parlando once.
+all. Once you grant it, parlando notices within a few seconds and enables
+the hotkey by itself. macOS sometimes quits the app the moment the switch
+is flipped; `Parlando.app` reopens itself in that case. This is a one-time
+step: the launcher bundle does not change on upgrades, so macOS keeps the
+permission.
 
 `Parlando.app` is a thin launcher (Info.plist, icon, a Mach-O stub and a
 script that runs the installed package) generated on your Mac and ad-hoc
 signed, so nothing is downloaded and no developer certificate is needed.
-Re-run `--install-app` after moving the Python environment that owns the
-package; it is not needed after `uv tool upgrade parlando`.
+Its contents do not change on upgrades, so macOS keeps the permissions.
+Re-run `--install-app` only after moving the Python environment that owns
+the package (that resets the permissions once).
 
 ## Usage
 
 ```bash
 parlando                      # menu bar app (default)
+parlando --install-app        # create ~/Applications/Parlando.app (recommended)
+parlando --uninstall-app      # remove it (and the login item)
 parlando --install-login      # start the menu bar app at login
 parlando --terminal           # dictate from the terminal; the options below need it
 parlando -t --language English   # dictate in another language
@@ -130,8 +150,6 @@ parlando -t --mode stream        # live word-by-word streaming
 parlando --pipe                  # print to stdout (scriptable; implies --terminal)
 parlando -t --hotkey cmd_r       # tap right Command instead
 parlando --list-devices          # list microphones
-parlando --install-app           # create ~/Applications/Parlando.app (recommended)
-parlando --uninstall-app         # remove it (and the login item)
 ```
 
 ### Voice commands
@@ -187,8 +205,8 @@ you speak. More "live", more sensitive to room noise.
 
 | Symptom | Fix |
 |---|---|
-| Nothing typed, "only silence" warning | Grant microphone permission, restart |
-| Hotkey does nothing / nothing typed | Grant Accessibility to Parlando (or your terminal), then restart; the hotkey listener is silent without it |
+| "Microphone is silent" | Allow Parlando (or your terminal) under Microphone; parlando reopens the mic by itself |
+| Hotkey does nothing / nothing typed | Grant Accessibility to Parlando (or your terminal); parlando enables the hotkey within seconds, no restart |
 | Stalls after sleep | The watchdog reopens the stream within ~5 s automatically |
 | Ghost text while silent (stream mode) | `--energy-floor 0.008` or `--silero` |
 | Missing soft speech (stream mode) | `--energy-floor 0.002` |
@@ -236,14 +254,23 @@ uvx --with numpy pytest tests -q   # unit tests; no model/mic needed
 uv run scripts/eval_polish.py      # polish quality benchmark (real local LLM)
 uv run scripts/make_icons.py       # regenerate icons, banner, Parlando.icns
 scripts/build_launcher.sh          # rebuild the Parlando.app Mach-O stub
+scripts/build_app.sh               # experimental: self-contained Parlando.app + .dmg
+scripts/make_signing_cert.sh       # experimental: stable signing identity for that build
 uv build                           # build the wheel/sdist
 ```
 
 Package layout: `src/parlando/` (engine, menubar, ASR engine, assets incl.
 the prebuilt app launcher). Entry point `parlando` (menu bar app by default,
 `--terminal` for the CLI); `parlando-menubar` is kept as an alias. CI runs
-the test suite and a packaging
-build on macOS via GitHub Actions.
+the test suite and a packaging build on macOS via GitHub Actions.
+
+`scripts/build_app.sh` produces a self-contained `Parlando.app` + `.dmg`
+(embedded Python and dependencies, ~250 MB; the speech model still
+downloads on first run). It is not the supported distribution yet: a
+downloaded app needs Developer ID signing and notarization to open without
+a Gatekeeper detour, and a stable signing identity so permissions survive
+updates (`make_signing_cert.sh` provides a self-signed one for local
+experiments). Until then, install with `uv`.
 
 ## Roadmap
 

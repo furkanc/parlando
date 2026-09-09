@@ -39,8 +39,7 @@ except ModuleNotFoundError as exc:
             length = length or int(len(buf) / 2)
             if length * 2 > len(buf):
                 raise IndexError(
-                    "buffer has %s frames, but length argument was %s"
-                    % (int(len(buf) / 2.0), length)
+                    f"buffer has {int(len(buf) / 2.0)} frames, but length argument was {length}"
                 )
             return _webrtcvad.process(self._vad, sample_rate, buf, length)
 

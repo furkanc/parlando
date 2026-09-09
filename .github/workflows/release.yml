@@ -3,9 +3,12 @@ name: Release to PyPI
 # Publishes ONLY when a GitHub Release is published, and only after a
 # Trusted Publisher is configured on PyPI for this repo (Settings on
 # pypi.org -> your project -> Publishing -> add GitHub publisher with this
-# repo, workflow file "release.yml" and environment "pypi"). Until both
-# happen, this workflow is inert. No API tokens are stored anywhere:
-# authentication uses GitHub's OIDC identity (PyPA's recommended setup).
+# repo, workflow file "release.yml" and environment "pypi"). No API tokens
+# are stored anywhere: authentication uses GitHub's OIDC identity (PyPA's
+# recommended setup).
+#
+# Distribution is the Python package: `uv tool install parlando`, then
+# `parlando --install-app` builds Parlando.app locally (see README).
 
 on:
   release:

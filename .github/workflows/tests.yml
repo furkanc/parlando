@@ -23,6 +23,9 @@ jobs:
       - name: Run unit tests
         run: pytest tests -q
 
+      - name: Lint (ruff)
+        run: pipx run ruff check src tests scripts
+
   build:
     runs-on: macos-latest
     steps:
