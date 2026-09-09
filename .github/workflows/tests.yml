@@ -1,0 +1,35 @@
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  unit:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # Heavy dependencies (mlx, sounddevice, pyobjc...) are imported lazily
+      # inside parlando.py, so unit tests only need numpy + pytest.
+      - name: Install test deps
+        run: pip install numpy pytest
+
+      - name: Run unit tests
+        run: pytest tests -q
+
+  build:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+
+      # Validate packaging metadata and the wheel build (nothing published).
+      - name: Build wheel and sdist
+        run: uv build

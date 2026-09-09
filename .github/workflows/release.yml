@@ -1,0 +1,44 @@
+name: Release to PyPI
+
+# Publishes ONLY when a GitHub Release is published, and only after a
+# Trusted Publisher is configured on PyPI for this repo (Settings on
+# pypi.org -> your project -> Publishing -> add GitHub publisher with this
+# repo, workflow file "release.yml" and environment "pypi"). Until both
+# happen, this workflow is inert. No API tokens are stored anywhere:
+# authentication uses GitHub's OIDC identity (PyPA's recommended setup).
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+
+      - name: Build wheel and sdist
+        run: uv build
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+    permissions:
+      id-token: write  # OIDC: this is what replaces API tokens
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - name: Publish to PyPI (trusted publishing)
+        uses: pypa/gh-action-pypi-publish@release/v1
