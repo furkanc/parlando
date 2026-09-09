@@ -139,11 +139,46 @@ def banner():
     print(f"wrote {out}")
 
 
+def menubar_states_strip():
+    """Small README-embeddable strip showing the three menu bar states.
+
+    Drawn on the brand's dark card so it is visible on both GitHub themes
+    (the raw template icons are black-on-transparent and would vanish in
+    dark mode).
+    """
+    cell, gap, mx, my = 288, 96, 84, 56
+    W, H = mx * 2 + 3 * cell + 2 * gap, 288 + my * 2
+    img, d = canvas(W, H, (0, 0, 0, 0))
+    d.rounded_rectangle([0, 0, W, H], radius=64, fill=BG)
+
+    x = mx
+    # Idle: centered wave
+    draw_wave(d, x + (cell - MARK_W) // 2, H // 2, 1.0, FG)
+    x += cell + gap
+    # Recording: wave + accent dot
+    draw_wave(d, x + 24, H // 2, 1.0, FG)
+    d.ellipse([x + 232, my + 36, x + 284, my + 88], fill=ACCENT)
+    x += cell + gap
+    # Paused: two equal bars
+    for bx in (88, 160):
+        d.rounded_rectangle(
+            [x + bx, my + 64, x + bx + BAR_W, my + 224],
+            radius=BAR_W // 2,
+            fill=FG,
+        )
+
+    BANNER_OUT.mkdir(parents=True, exist_ok=True)
+    out = BANNER_OUT / "menubar-states.png"
+    img.resize((W // 4, H // 4), Image.LANCZOS).save(out)
+    print(f"wrote {out}")
+
+
 def main() -> None:
     save_icon(icon_idle(), "mic.png")
     save_icon(icon_recording(), "mic-recording.png")
     save_icon(icon_paused(), "mic-paused.png")
     banner()
+    menubar_states_strip()
 
 
 if __name__ == "__main__":
