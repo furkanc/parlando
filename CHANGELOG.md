@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.1 — 2026-09-09
+
+- README images now use absolute URLs so the banner and menu bar icon
+  strip render on PyPI (relative paths only resolve on GitHub).
+
 ## 0.4.0 — 2026-09-09
 
 - **Cleanup**: unambiguous vocalized fillers (um, uh, eee, ııı) are removed
