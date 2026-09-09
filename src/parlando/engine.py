@@ -25,6 +25,7 @@ Design (dictation best practices):
 
 Usage:
     parlando                    # menu bar app: icon top right, settings in its menu
+    parlando --install-app      # create ~/Applications/Parlando.app (recommended)
     parlando --install-login    # start the menu bar app at login
     parlando --terminal         # dictate from this terminal window instead
     parlando -t --language English  # terminal options (all need --terminal / -t)
@@ -57,17 +58,22 @@ import argparse
 import asyncio
 import collections
 import logging
+import os
 import signal
 import subprocess
 import sys
 import time
 import traceback
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import numpy as np
 
 from parlando import __version__
+
+# huggingface_hub reads this once at import: keep its progress bars off
+# (the engine reports download progress itself; see _ensure_model).
+os.environ.setdefault("HF_HUB_DISABLE_PROGRESS_BARS", "1")
 
 # Heavy dependencies (mlx, sounddevice, Quartz, pynput, onnxruntime, stt)
 # are imported lazily on purpose: --help stays fast, unit tests need no
@@ -81,6 +87,7 @@ MIN_SPEECH_MS = 250          # anything shorter is a click/cough; dropped
 MIN_PARTIAL_SECONDS = 0.6    # minimum audio before partial ASR
 INT16_SCALE = 1.0 / 32768.0
 WATCHDOG_SECONDS = 5.0       # reopen the stream if no frames for this long
+AX_POLL_SECONDS = 2.0        # re-check Accessibility while it is missing
 MIC_ZERO_FRAMES = 100        # ~3s of pure zeros -> permission warning
 MAX_RECORD_SECONDS = 120     # hard safety cap for record mode
 CHUNK_SECONDS = 28           # model window; longer recordings are split
@@ -115,6 +122,85 @@ class Config:
     # "record": tap to start/stop, transcribe once (default; most robust).
     # "stream": always listening, words appear as you speak.
     mode: str = "record"
+
+
+@dataclass
+class Status:
+    """What the engine is doing right now, for shells (menu bar, terminal).
+
+    phase: starting | downloading | loading | ready | recording |
+           transcribing | paused
+    problems: things the user must fix, e.g. "accessibility", "microphone".
+    downloaded/total: bytes, meaningful while phase == "downloading".
+    """
+
+    phase: str = "starting"
+    detail: str = ""
+    downloaded: int = 0
+    total: int = 0
+    problems: list[str] = field(default_factory=list)
+
+    @property
+    def progress(self) -> float | None:
+        if self.phase != "downloading" or not self.total:
+            return None
+        return min(1.0, self.downloaded / self.total)
+
+
+def short_model_name(repo_id: str) -> str:
+    return repo_id.rsplit("/", 1)[-1]
+
+
+def human_bytes(n: int) -> str:
+    if n >= 1 << 30:
+        return f"{n / (1 << 30):.1f} GB"
+    if n >= 1 << 20:
+        return f"{n / (1 << 20):.0f} MB"
+    return f"{n / 1024:.0f} KB"
+
+
+# Files a model download needs; the same patterns stt.py / mlx_lm use, so
+# the pre-download here makes their own snapshot_download a cache hit.
+ASR_MODEL_PATTERNS = ["*.json", "*.safetensors", "*.model", "*.txt"]
+LLM_MODEL_PATTERNS = ["*.json", "*.safetensors", "*.py", "tokenizer.model",
+                      "*.tiktoken", "*.txt", "*.jsonl"]
+
+
+def progress_tqdm_class(status: Status):
+    """A tqdm subclass that reports byte progress into `status`.
+
+    huggingface_hub drives several bars: one per snapshot (files, unit
+    "it"), and byte bars (unit "B") whose `total` may be set after
+    construction. With hf_xet there are two byte bars for the same bytes,
+    "Downloading bytes" and "Reconstructing ..."; only the first counts.
+    Display is disabled by HF_HUB_DISABLE_PROGRESS_BARS; update() is still
+    called, so each bar keeps its own byte counter here.
+    """
+    from huggingface_hub.utils import tqdm as hf_tqdm
+
+    bars: dict[int, ProgressTqdm] = {}
+
+    def recompute() -> None:
+        status.downloaded = sum(b._bytes for b in bars.values())
+        status.total = sum(int(b.total or 0) for b in bars.values())
+
+    class ProgressTqdm(hf_tqdm):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            desc = str(kwargs.get("desc") or "").lower()
+            self._counted = kwargs.get("unit") == "B" and "reconstruct" not in desc
+            self._bytes = int(kwargs.get("initial") or 0)
+            if self._counted:
+                bars[id(self)] = self
+                recompute()
+
+        def update(self, n=1):
+            if self._counted and n:
+                self._bytes += int(n)
+                recompute()
+            return super().update(n)
+
+    return ProgressTqdm
 
 
 # -----------------------------------------------------------------------------
@@ -691,6 +777,8 @@ class DictationEngine:
         self._mic_warned = False
         self._stream_restarts = 0
         self.accessibility_missing = False  # read by the menu bar shell
+        self._hotkey = None                 # pynput listener, if any
+        self.status = Status()              # read by shells (menu bar, tests)
 
     # -- status / logging -----------------------------------------------------
 
@@ -713,6 +801,20 @@ class DictationEngine:
         sys.stderr.flush()
         self._last_status = ""
 
+    def _set_phase(self, phase: str, detail: str = "") -> None:
+        self.status.phase = phase
+        self.status.detail = detail
+        if self.on_state:
+            self.on_state(phase)
+
+    def _add_problem(self, name: str) -> None:
+        if name not in self.status.problems:
+            self.status.problems.append(name)
+
+    def _clear_problem(self, name: str) -> None:
+        if name in self.status.problems:
+            self.status.problems.remove(name)
+
     # -- pause / resume, record toggle ---------------------------------------
 
     def toggle_pause(self) -> None:
@@ -734,8 +836,7 @@ class DictationEngine:
             stderr=subprocess.DEVNULL,
         )
         LOGGER.info("dictation %s", "paused" if self.paused else "resumed")
-        if self.on_state:
-            self.on_state("paused" if self.paused else "listening")
+        self._set_phase("paused" if self.paused else "ready")
 
     def toggle_record(self) -> None:
         """Record-mode hotkey: start recording / stop and type."""
@@ -756,8 +857,7 @@ class DictationEngine:
             stderr=subprocess.DEVNULL,
         )
         LOGGER.info("recording %s", "stopped" if not self.recording else "started")
-        if self.on_state:
-            self.on_state("recording" if self.recording else "listening")
+        self._set_phase("recording" if self.recording else "transcribing")
 
     def toggle_action(self) -> None:
         if self.cfg.mode == "record":
@@ -802,21 +902,49 @@ class DictationEngine:
         stream.start()
         return stream
 
+    async def _reopen_stream(self, stream, quiet: bool = False):
+        try:
+            stream.stop()
+            stream.close()
+        except Exception:  # noqa: BLE001
+            pass
+        await asyncio.sleep(0.5)
+        try:
+            stream = self._open_stream()
+            if not quiet:
+                self._info("Audio stream reopened.")
+        except Exception as exc:  # noqa: BLE001
+            self._err(f"Stream reopen failed: {exc!r}; retrying in 3s")
+            await asyncio.sleep(3)
+        return stream
+
     def _check_mic_silence(self, frame: np.ndarray) -> None:
-        """Without mic permission macOS delivers zeros, not errors — warn."""
-        if self._mic_warned or self._mic_zero_count > MIC_ZERO_FRAMES:
-            return
+        """Without mic permission macOS delivers zeros, not errors — warn.
+
+        Checked during the first ~3 s only (real microphones never deliver
+        exact zeros); once warned, the first real audio clears the problem.
+        """
+        if self._mic_zero_count > MIC_ZERO_FRAMES and not self._mic_warned:
+            return  # audio was seen at startup; check done
         if int(np.max(np.abs(frame))) < 10:
+            if self._mic_warned:
+                return
             self._mic_zero_count += 1
             if self._mic_zero_count == MIC_ZERO_FRAMES:
                 self._mic_warned = True
+                self._add_problem("microphone")
                 self._err(
                     "Only silence is coming from the microphone. Most likely "
-                    "the mic permission is missing: Settings > Privacy & "
-                    "Security > Microphone > allow your terminal, then restart."
+                    "the mic permission is missing: System Settings > Privacy "
+                    "& Security > Microphone > allow the app that runs "
+                    "parlando (Parlando.app, or your terminal)."
                 )
         else:
-            self._mic_zero_count = MIC_ZERO_FRAMES + 1  # got audio; check done
+            if self._mic_warned:
+                self._mic_warned = False
+                self._clear_problem("microphone")
+                self._info("Microphone audio is flowing.")
+            self._mic_zero_count = MIC_ZERO_FRAMES + 1
 
     # -- ASR ------------------------------------------------------------------
 
@@ -975,9 +1103,17 @@ class DictationEngine:
         self.rec_samples = 0
 
         if rec_seconds < 0.4:
+            self._set_phase("ready")
             return
 
         self._status(f"✎ transcribing ({rec_seconds:.1f}s)...")
+        self._set_phase("transcribing", f"{rec_seconds:.1f} s of audio")
+        try:
+            await self._transcribe_record(audio)
+        finally:
+            self._set_phase("ready")
+
+    async def _transcribe_record(self, audio: np.ndarray) -> None:
         words: list[str] = []
         for chunk in self._split_audio(audio):
             text = await self._asr(chunk)
@@ -996,6 +1132,7 @@ class DictationEngine:
             plain = " ".join(w for w in words if w != ENTER_TOKEN)
             if plain:
                 self._status("✎ polishing...")
+                self.status.detail = "polishing"
                 try:
                     polished = await asyncio.to_thread(
                         polish_text, self.llm, self.llm_tokenizer, plain
@@ -1077,8 +1214,50 @@ class DictationEngine:
 
     # -- setup / main loop ----------------------------------------------------
 
+    async def _ensure_model(self, repo_id: str, patterns: list[str], label: str) -> None:
+        """Download `repo_id` if it is not cached, reporting progress.
+
+        Later loaders call snapshot_download themselves; after this it is a
+        cache hit. Progress goes to self.status (menu bar) and the terminal
+        status line.
+        """
+        from huggingface_hub import snapshot_download
+
+        if Path(repo_id).exists():
+            return
+        try:
+            await asyncio.to_thread(
+                snapshot_download, repo_id, allow_patterns=patterns, local_files_only=True
+            )
+            return
+        except Exception:  # noqa: BLE001 — not (fully) cached: download
+            pass
+
+        name = short_model_name(repo_id)
+        self._info(f"Downloading {label} {name} (first run only)...")
+        self.status.downloaded = self.status.total = 0
+        self._set_phase("downloading", f"{label} · {name}")
+        task = asyncio.ensure_future(asyncio.to_thread(
+            snapshot_download, repo_id, allow_patterns=patterns,
+            tqdm_class=progress_tqdm_class(self.status),
+        ))
+        while not task.done():
+            st = self.status
+            pct = f" {st.progress * 100:3.0f}%" if st.progress is not None else ""
+            size = (f" {human_bytes(st.downloaded)} / {human_bytes(st.total)}"
+                    if st.total else "")
+            self._status(f"⬇ downloading {label}{pct}{size}")
+            await asyncio.sleep(0.3)
+        await task  # re-raise download errors
+        # hf_xet serves some chunks from its local cache without a transfer
+        # update, so the counter can stop short of the total; it is done.
+        self.status.downloaded = self.status.total
+        self._info(f"Downloaded {label} {name}.")
+
     async def _load_models(self) -> None:
-        self._info(f"Loading model: {self.cfg.model} (downloads on first run)...")
+        await self._ensure_model(self.cfg.model, ASR_MODEL_PATTERNS, "speech model")
+        self._info(f"Loading model: {self.cfg.model}...")
+        self._set_phase("loading", f"speech model · {short_model_name(self.cfg.model)}")
         from parlando import stt
 
         self._stt = stt
@@ -1097,7 +1276,13 @@ class DictationEngine:
 
         if self.cfg.polish:
             try:
+                await self._ensure_model(
+                    self.cfg.polish_model, LLM_MODEL_PATTERNS, "polish model"
+                )
                 self._info(f"Loading polish LLM: {self.cfg.polish_model}...")
+                self._set_phase(
+                    "loading", f"polish model · {short_model_name(self.cfg.polish_model)}"
+                )
                 from mlx_lm.utils import load as load_llm
 
                 self.llm, self.llm_tokenizer = await asyncio.to_thread(
@@ -1151,12 +1336,33 @@ class DictationEngine:
         trusted = accessibility_trusted(prompt=True)
         if trusted is False:
             self.accessibility_missing = True
+            self._add_problem("accessibility")
             self._err(
                 "Accessibility permission missing: the hotkey will NOT be "
                 "heard and text CANNOT be typed. System Settings > Privacy & "
                 "Security > Accessibility > enable the app that runs parlando "
-                "(Parlando.app, or your terminal), then restart parlando."
+                "(Parlando.app, or your terminal). No restart needed: parlando "
+                "picks the permission up within a few seconds."
             )
+
+    def _poll_accessibility(self) -> bool:
+        """While the permission is missing, notice when it gets granted.
+
+        A pynput listener created before the grant never receives events,
+        so the hotkey is set up again. Returns True when recovered.
+        """
+        if not self.accessibility_missing or accessibility_trusted() is not True:
+            return False
+        self.accessibility_missing = False
+        self._clear_problem("accessibility")
+        if self._hotkey is not None:
+            try:
+                self._hotkey.stop()
+            except Exception:  # noqa: BLE001
+                pass
+        self._hotkey = self._setup_hotkey()
+        self._info("Accessibility permission granted; hotkey and typing active.")
+        return True
 
     def _render_status(self) -> None:
         if self.cfg.mode == "record":
@@ -1190,10 +1396,11 @@ class DictationEngine:
         if not self.cfg.pipe:
             self.typist = make_typist()
         self._check_permissions()
-        hotkey = self._setup_hotkey()
+        self._hotkey = self._setup_hotkey()
 
         stream = self._open_stream()
         last_frame_time = self.loop.time()
+        last_ax_check = last_frame_time
 
         stop_event = asyncio.Event()
         try:
@@ -1219,8 +1426,8 @@ class DictationEngine:
             self._info(
                 "Ready. Click the target window and speak. (Ctrl+C to quit)"
             )
-        if self.on_state:
-            self.on_state("paused" if self.paused else "listening")
+        self._set_phase("paused" if self.paused else "ready")
+        last_mic_reopen = self.loop.time()
 
         try:
             while not stop_event.is_set():
@@ -1228,7 +1435,7 @@ class DictationEngine:
                 try:
                     try:
                         frame = await asyncio.wait_for(self.queue.get(), timeout=0.1)
-                    except asyncio.TimeoutError:
+                    except TimeoutError:
                         frame = None
 
                     now = self.loop.time()
@@ -1247,19 +1454,18 @@ class DictationEngine:
                             f"No audio for {WATCHDOG_SECONDS:.0f}s; "
                             "reopening the stream..."
                         )
-                        try:
-                            stream.stop()
-                            stream.close()
-                        except Exception:  # noqa: BLE001
-                            pass
-                        await asyncio.sleep(0.5)
-                        try:
-                            stream = self._open_stream()
-                            self._info("Audio stream reopened.")
-                        except Exception as exc:  # noqa: BLE001
-                            self._err(f"Stream reopen failed: {exc!r}; retrying in 3s")
-                            await asyncio.sleep(3)
+                        stream = await self._reopen_stream(stream)
                         last_frame_time = self.loop.time()
+
+                    if self._mic_warned and now - last_mic_reopen >= WATCHDOG_SECONDS:
+                        # A stream opened before the mic permission was granted
+                        # stays silent; a fresh one picks the grant up.
+                        last_mic_reopen = now
+                        stream = await self._reopen_stream(stream, quiet=True)
+
+                    if self.accessibility_missing and now - last_ax_check >= AX_POLL_SECONDS:
+                        last_ax_check = now
+                        self._poll_accessibility()
 
                     if self._rec_finalize:
                         await self._finalize_record()
@@ -1281,9 +1487,9 @@ class DictationEngine:
                     self._err("internal error (continuing):\n" + traceback.format_exc())
                     await asyncio.sleep(0.2)
         finally:
-            if hotkey is not None:
+            if self._hotkey is not None:
                 try:
-                    hotkey.stop()
+                    self._hotkey.stop()
                 except Exception:  # noqa: BLE001
                     pass
             try:
@@ -1325,6 +1531,11 @@ def build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--terminal", "-t", action="store_true",
                    help="Dictate from this terminal instead of the menu bar "
                         "(status here, Ctrl+C to quit). Implied by --pipe.")
+    p.add_argument("--install-app", action="store_true",
+                   help="Create ~/Applications/Parlando.app so macOS asks for "
+                        "permissions in Parlando's name, then exit")
+    p.add_argument("--uninstall-app", action="store_true",
+                   help="Remove Parlando.app and its login item, then exit")
     p.add_argument("--install-login", action="store_true",
                    help="Start the menu bar app at login (LaunchAgent), then exit")
     p.add_argument("--uninstall-login", action="store_true",
@@ -1440,6 +1651,10 @@ def main() -> int:
 
     from parlando import menubar  # lazy: the engine stays importable alone
 
+    if args.install_app:
+        return menubar.install_app()
+    if args.uninstall_app:
+        return menubar.uninstall_app()
     if args.install_login:
         return menubar.install_login()
     if args.uninstall_login:

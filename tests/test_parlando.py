@@ -616,3 +616,323 @@ def test_app_bundle_adhoc_signature_verifies(tmp_path):
         capture_output=True, text=True,
     )
     assert r.returncode == 0, r.stderr
+
+
+def test_cli_app_flags_dispatch(monkeypatch):
+    from parlando import menubar
+
+    calls = []
+    monkeypatch.setattr(menubar, "install_app", lambda: calls.append("install") or 0)
+    monkeypatch.setattr(menubar, "uninstall_app", lambda: calls.append("uninstall") or 0)
+    monkeypatch.setattr(sys, "argv", ["parlando", "--install-app"])
+    assert vt.main() == 0
+    monkeypatch.setattr(sys, "argv", ["parlando", "--uninstall-app"])
+    assert vt.main() == 0
+    assert calls == ["install", "uninstall"]
+
+
+# -----------------------------------------------------------------------------
+# Accessibility auto-recovery: no restart after granting the permission
+# -----------------------------------------------------------------------------
+
+
+class _FakeListener:
+    def __init__(self):
+        self.stopped = False
+
+    def stop(self):
+        self.stopped = True
+
+
+def test_poll_accessibility_recovers_and_rebuilds_hotkey(monkeypatch):
+    eng = vt.DictationEngine(vt.Config())
+    old = _FakeListener()
+    eng._hotkey = old
+    eng.accessibility_missing = True
+    built = []
+    monkeypatch.setattr(eng, "_setup_hotkey", lambda: built.append(1) or _FakeListener())
+
+    monkeypatch.setattr(vt, "accessibility_trusted", lambda prompt=False: False)
+    assert eng._poll_accessibility() is False
+    assert eng.accessibility_missing and built == [] and not old.stopped
+
+    monkeypatch.setattr(vt, "accessibility_trusted", lambda prompt=False: True)
+    assert eng._poll_accessibility() is True
+    assert not eng.accessibility_missing
+    assert old.stopped, "the dead pre-grant listener must be stopped"
+    assert built == [1] and eng._hotkey is not old
+    # Already recovered: nothing more happens.
+    assert eng._poll_accessibility() is False and built == [1]
+
+
+def test_poll_accessibility_noop_when_not_missing(monkeypatch):
+    eng = vt.DictationEngine(vt.Config())
+    monkeypatch.setattr(vt, "accessibility_trusted", lambda prompt=False: pytest.fail("no check"))
+    assert eng._poll_accessibility() is False
+
+
+def test_app_bundle_embedded_runtime_uses_relative_python(tmp_path):
+    """scripts/build_app.sh passes a Resources-relative interpreter path."""
+    from parlando import menubar
+
+    dest = menubar.build_app_bundle(
+        tmp_path / "E.app", python="runtime/bin/python3", sign=False, version="9.9.9"
+    )
+    text = (dest / "Contents" / "Resources" / "launch.sh").read_text()
+    assert 'RES=$(cd "$(dirname "$0")" && pwd)' in text
+    assert '"$RES"/\'runtime/bin/python3\' -m parlando.menubar' in text
+    import plistlib
+    with open(dest / "Contents" / "Info.plist", "rb") as fh:
+        assert plistlib.load(fh)["CFBundleShortVersionString"] == "9.9.9"
+
+
+# -----------------------------------------------------------------------------
+# Status: engine phases, download progress, menu bar presentation
+# -----------------------------------------------------------------------------
+
+
+def test_status_progress_and_human_bytes():
+    st = vt.Status()
+    assert st.progress is None
+    st.phase, st.total, st.downloaded = "downloading", 2000, 500
+    assert st.progress == 0.25
+    assert vt.human_bytes(2_400_000_000) == "2.2 GB"
+    assert vt.human_bytes(50 * 1024 * 1024) == "50 MB"
+    assert vt.short_model_name("mlx-community/Qwen3-ASR-1.7B-8bit") == "Qwen3-ASR-1.7B-8bit"
+
+
+def test_progress_tqdm_aggregates_byte_bars_only():
+    pytest.importorskip("huggingface_hub")
+    st = vt.Status(phase="downloading")
+    T = vt.progress_tqdm_class(st)
+    files = T(total=3, unit="it", disable=True)      # snapshot-level bar: ignored
+    a = T(total=1000, unit="B", disable=True)
+    b = T(total=500, unit="B", initial=100, disable=True)
+    r = T(total=0, unit="B", desc="Reconstructing (incomplete total...)", disable=True)
+    assert st.total == 1500 and st.downloaded == 100
+    a.update(400)
+    b.update(50)
+    files.update(1)
+    r.update(450)  # r: the same bytes again; must not count
+    assert st.downloaded == 550
+    assert abs(st.progress - 550 / 1500) < 1e-9
+    # hf_xet sets the total after construction.
+    c = T(total=0, unit="B", desc="Downloading bytes", disable=True)
+    c.total = 2000
+    c.update(1000)
+    assert st.total == 3500 and st.downloaded == 1550
+
+
+def test_record_flow_phases(monkeypatch):
+    monkeypatch.setattr(subprocess, "Popen", lambda *a, **k: None)
+    eng = vt.DictationEngine(vt.Config(mode="record"))
+    eng.typist = FakeTypist()
+    phases = []
+    eng.on_state = phases.append
+
+    async def fake_asr(_a):
+        return "hello"
+
+    eng._asr = fake_asr
+    eng.toggle_action()
+    assert eng.status.phase == "recording"
+    for _ in range(50):
+        eng._on_frame(np.ones(480, np.int16) * 1000)
+    eng.toggle_action()
+    assert eng.status.phase == "transcribing"
+    asyncio.new_event_loop().run_until_complete(eng._finalize_record())
+    assert eng.status.phase == "ready"
+    assert phases == ["recording", "transcribing", "transcribing", "ready"]
+
+
+def test_short_recording_returns_to_ready(monkeypatch):
+    monkeypatch.setattr(subprocess, "Popen", lambda *a, **k: None)
+    eng = vt.DictationEngine(vt.Config(mode="record"))
+    eng.toggle_action()
+    eng.toggle_action()
+    asyncio.new_event_loop().run_until_complete(eng._finalize_record())
+    assert eng.status.phase == "ready"
+
+
+def test_mic_silence_problem_is_recoverable():
+    eng = vt.DictationEngine(vt.Config())
+    zeros = np.zeros(480, np.int16)
+    for _ in range(vt.MIC_ZERO_FRAMES):
+        eng._check_mic_silence(zeros)
+    assert eng.status.problems == ["microphone"] and eng._mic_warned
+    eng._check_mic_silence(np.ones(480, np.int16) * 500)
+    assert eng.status.problems == [] and not eng._mic_warned
+    # Later silence (a quiet room, a muted mic) must not re-trigger it.
+    for _ in range(vt.MIC_ZERO_FRAMES + 5):
+        eng._check_mic_silence(zeros)
+    assert eng.status.problems == []
+
+
+def test_accessibility_problem_tracks_recovery(monkeypatch):
+    eng = vt.DictationEngine(vt.Config())
+    monkeypatch.setattr(vt, "accessibility_trusted", lambda prompt=False: False)
+    eng._check_permissions()
+    assert eng.status.problems == ["accessibility"]
+    monkeypatch.setattr(eng, "_setup_hotkey", lambda: None)
+    monkeypatch.setattr(vt, "accessibility_trusted", lambda prompt=False: True)
+    eng._poll_accessibility()
+    assert eng.status.problems == []
+
+
+def test_ensure_model_skips_when_cached(monkeypatch):
+    hub = pytest.importorskip("huggingface_hub")
+    eng = vt.DictationEngine(vt.Config())
+    calls = []
+
+    def fake_snapshot(repo_id, **kw):
+        calls.append(kw.get("local_files_only", False))
+        return "/cached"
+
+    monkeypatch.setattr(hub, "snapshot_download", fake_snapshot)
+    asyncio.new_event_loop().run_until_complete(
+        eng._ensure_model("org/model", vt.ASR_MODEL_PATTERNS, "speech model")
+    )
+    assert calls == [True] and eng.status.phase == "starting"
+
+
+def test_ensure_model_downloads_with_progress(monkeypatch):
+    hub = pytest.importorskip("huggingface_hub")
+    eng = vt.DictationEngine(vt.Config())
+    seen = []
+
+    def fake_snapshot(repo_id, **kw):
+        if kw.get("local_files_only"):
+            raise FileNotFoundError("not cached")
+        bar = kw["tqdm_class"](total=100, unit="B", disable=True)
+        bar.update(100)
+        seen.append(eng.status.phase)
+        return "/downloaded"
+
+    monkeypatch.setattr(hub, "snapshot_download", fake_snapshot)
+    asyncio.new_event_loop().run_until_complete(
+        eng._ensure_model("org/model", vt.ASR_MODEL_PATTERNS, "speech model")
+    )
+    assert seen == ["downloading"]
+    assert eng.status.downloaded == eng.status.total == 100
+
+
+def _menu_engine(**cfg):
+    eng = vt.DictationEngine(vt.Config(**cfg))
+    eng.status.phase = "ready"
+    return eng
+
+
+def test_describe_status_ready_and_recording():
+    from parlando import menubar
+
+    eng = _menu_engine(mode="record")
+    v = menubar.describe_status(eng)
+    assert v["primary"].startswith("Ready — tap right ⌥ Option")
+    assert v["badge"] == "" and v["icon"] == "idle" and v["can_toggle"]
+    assert v["toggle"] == "Start recording" and v["action"] is None
+
+    eng.recording = True
+    eng.status.phase = "recording"
+    eng.rec_samples = 3 * vt.SAMPLE_RATE
+    v = menubar.describe_status(eng)
+    assert v["primary"] == "● Recording 3 s" and v["icon"] == "recording"
+    assert v["toggle"] == "Stop recording and type"
+
+
+def test_describe_status_downloading_and_loading():
+    from parlando import menubar
+
+    eng = _menu_engine()
+    eng.status.phase = "downloading"
+    eng.status.detail = "speech model · Qwen3-ASR-1.7B-8bit"
+    eng.status.total, eng.status.downloaded = 2 * (1 << 30), 1 << 30
+    v = menubar.describe_status(eng)
+    assert v["badge"] == "50%" and v["primary"] == "Downloading speech model… 50%"
+    assert v["secondary"] == "1.0 GB of 2.0 GB · first run only"
+    assert not v["can_toggle"]
+
+    eng.status.total = 0
+    v = menubar.describe_status(eng)
+    assert v["badge"] == "⬇" and v["primary"] == "Downloading speech model…"
+
+    eng.status.phase, eng.status.detail = "loading", "speech model · X"
+    v = menubar.describe_status(eng)
+    assert v["badge"] == "…" and v["primary"] == "Loading speech model · X…"
+
+
+def test_describe_status_problem_offers_settings_action():
+    from parlando import menubar
+
+    eng = _menu_engine()
+    eng.status.problems = ["accessibility"]
+    v = menubar.describe_status(eng)
+    assert v["badge"] == "!" and v["action"] == "accessibility"
+    assert "Accessibility" in v["primary"]
+    assert "Accessibility" in menubar._PROBLEM_TEXT["accessibility"][2]
+    assert "accessibility" in menubar.SETTINGS_PANES
+    assert v["can_toggle"]  # menu-driven recording still works
+
+
+def test_describe_status_language_badge_and_stream_mode():
+    from parlando import menubar
+
+    eng = _menu_engine(mode="stream", language="English")
+    v = menubar.describe_status(eng)
+    assert v["badge"] == menubar.LANGUAGE_BADGES["English"]
+    assert v["toggle"] == "Pause" and v["primary"].startswith("Listening")
+    eng.paused = True
+    eng.status.phase = "paused"
+    v = menubar.describe_status(eng)
+    assert v["toggle"] == "Resume" and v["icon"] == "paused" and v["primary"] == "Paused"
+
+
+# -----------------------------------------------------------------------------
+# Relaunch guard (macOS kills the app when Accessibility is toggled)
+# -----------------------------------------------------------------------------
+
+
+def test_guard_plist_waits_for_pid_then_opens_app():
+    from parlando import menubar
+
+    pl = menubar.guard_plist("com.x.guard", 4242, Path("/Applications/Parlando.app"))
+    assert pl["Label"] == "com.x.guard" and pl["RunAtLoad"] is True
+    sh = pl["ProgramArguments"]
+    assert sh[:2] == ["/bin/sh", "-c"]
+    assert "kill -0 4242" in sh[2] and "/usr/bin/open -g '/Applications/Parlando.app'" in sh[2]
+
+
+def test_relaunch_guard_start_stop(monkeypatch, tmp_path):
+    from parlando import menubar
+
+    calls = []
+
+    def fake_run(cmd, **kw):
+        calls.append(cmd[:2])
+        return subprocess.CompletedProcess(cmd, 0, "", "")
+
+    monkeypatch.setattr(menubar.subprocess, "run", fake_run)
+    monkeypatch.setattr(menubar, "GUARD_PLIST", tmp_path / "guard.plist")
+    g = menubar.RelaunchGuard(Path("/Applications/Parlando.app"))
+    g.start()
+    assert g.active and (tmp_path / "guard.plist").exists()
+    assert ["launchctl", "bootstrap"] in calls
+    g.start()  # idempotent
+    assert calls.count(["launchctl", "bootstrap"]) == 1
+    g.stop()
+    assert not g.active and calls[-1] == ["launchctl", "bootout"]
+    g.stop()  # idempotent
+    assert calls.count(["launchctl", "bootout"]) == 2  # one pre-clean in start, one in stop
+
+
+def test_relaunch_guard_inactive_outside_bundle(monkeypatch):
+    from parlando import menubar
+
+    monkeypatch.delenv("PARLANDO_APP_BUNDLE", raising=False)
+    assert menubar.app_bundle_path() is None
+    monkeypatch.setattr(menubar.subprocess, "run",
+                        lambda *a, **k: pytest.fail("no launchctl without a bundle"))
+    g = menubar.RelaunchGuard(menubar.app_bundle_path())
+    g.start()
+    assert not g.active
+    monkeypatch.setenv("PARLANDO_APP_BUNDLE", "/Applications/Parlando.app")
+    assert menubar.app_bundle_path() == Path("/Applications/Parlando.app")
