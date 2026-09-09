@@ -232,9 +232,8 @@ build on macOS via GitHub Actions.
 ## Roadmap
 
 - [x] One-line installer (`install.sh`) with `parlando` launcher command
-- [x] Proper Python package (`uv tool install`, entry points) — PyPI
-      publication pending, after which `uvx parlando` will work
-- [ ] Publish to PyPI
+- [x] Proper Python package (`uv tool install`, entry points)
+- [x] Publish to PyPI (`uvx parlando` works)
 - [ ] Homebrew tap (`brew install parlando`)
 - [ ] End-to-end regression tests with recorded WAV fixtures
 - [ ] Custom vocabulary / context biasing
