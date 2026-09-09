@@ -548,3 +548,71 @@ def test_terminal_options_given_and_wants_terminal():
     args = parser.parse_args(["-t", "--language", "English", "--polish", "--hotkey", "alt_r"])
     assert vt.wants_terminal(args)
     assert vt.terminal_options_given(parser, args) == ["--language", "--polish"]
+
+
+# -----------------------------------------------------------------------------
+# Parlando.app bundle (menu bar shell)
+# -----------------------------------------------------------------------------
+
+
+def test_app_bundle_layout(tmp_path):
+    import plistlib
+
+    from parlando import menubar
+
+    dest = menubar.build_app_bundle(
+        tmp_path / "Parlando.app", python="/opt/py/bin/python3", sign=False
+    )
+    contents = dest / "Contents"
+    with open(contents / "Info.plist", "rb") as fh:
+        info = plistlib.load(fh)
+    assert info["CFBundleIdentifier"] == menubar.BUNDLE_ID
+    assert info["CFBundleExecutable"] == "parlando"
+    assert info["LSUIElement"] is True
+    assert "NSMicrophoneUsageDescription" in info
+    assert (contents / "Resources" / (info["CFBundleIconFile"] + ".icns")).exists()
+
+    exe = contents / "MacOS" / "parlando"
+    assert exe.stat().st_mode & 0o111, "main executable must be executable"
+    # A real Mach-O, not a script: macOS refuses script main executables.
+    assert exe.read_bytes()[:4] in (b"\xcf\xfa\xed\xfe", b"\xca\xfe\xba\xbe")
+
+    script = contents / "Resources" / "launch.sh"
+    assert script.stat().st_mode & 0o111
+    text = script.read_text()
+    assert text.startswith("#!/bin/sh")
+    assert "'/opt/py/bin/python3' -m parlando.menubar" in text
+
+
+def test_app_bundle_launcher_quotes_python_path(tmp_path):
+    from parlando import menubar
+
+    dest = menubar.build_app_bundle(
+        tmp_path / "P.app", python="/Users/o'brien/py/bin/python", sign=False
+    )
+    text = (dest / "Contents" / "Resources" / "launch.sh").read_text()
+    assert "'/Users/o'\\''brien/py/bin/python'" in text
+
+
+def test_app_bundle_is_stable_across_rebuilds(tmp_path):
+    """Same inputs -> identical files, so re-running --install-app never
+    changes the bundle hash the privacy database keys permissions on."""
+    from parlando import menubar
+
+    a = menubar.build_app_bundle(tmp_path / "A.app", python="/x/python", sign=False)
+    b = menubar.build_app_bundle(tmp_path / "B.app", python="/x/python", sign=False)
+    for rel in ("Contents/Info.plist", "Contents/Resources/launch.sh",
+                "Contents/MacOS/parlando"):
+        assert (a / rel).read_bytes() == (b / rel).read_bytes()
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="codesign is macOS-only")
+def test_app_bundle_adhoc_signature_verifies(tmp_path):
+    from parlando import menubar
+
+    dest = menubar.build_app_bundle(tmp_path / "S.app", python="/x/python", sign=True)
+    r = subprocess.run(
+        ["codesign", "--verify", "--deep", "--strict", str(dest)],
+        capture_output=True, text=True,
+    )
+    assert r.returncode == 0, r.stderr

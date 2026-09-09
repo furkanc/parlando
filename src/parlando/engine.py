@@ -620,12 +620,20 @@ class TapDetector:
         return not self.chorded and (time.monotonic() - self.t) < self.timeout
 
 
-def accessibility_trusted() -> bool | None:
-    """Is Accessibility permission granted? None = could not determine."""
-    try:
-        from ApplicationServices import AXIsProcessTrusted
+def accessibility_trusted(prompt: bool = False) -> bool | None:
+    """Is Accessibility permission granted? None = could not determine.
 
-        return bool(AXIsProcessTrusted())
+    With `prompt=True` macOS shows its own "wants to control this computer"
+    dialog and adds the responsible app (the terminal, or Parlando.app) to
+    the Accessibility list, so the user only has to flip the switch.
+    """
+    try:
+        from ApplicationServices import (
+            AXIsProcessTrustedWithOptions,
+            kAXTrustedCheckOptionPrompt,
+        )
+
+        return bool(AXIsProcessTrustedWithOptions({kAXTrustedCheckOptionPrompt: prompt}))
     except Exception:  # noqa: BLE001
         return None
 
@@ -682,6 +690,7 @@ class DictationEngine:
         self._mic_zero_count = 0
         self._mic_warned = False
         self._stream_restarts = 0
+        self.accessibility_missing = False  # read by the menu bar shell
 
     # -- status / logging -----------------------------------------------------
 
@@ -1133,14 +1142,20 @@ class DictationEngine:
             return None
 
     def _check_permissions(self) -> None:
-        if self.cfg.pipe:
+        # Accessibility gates BOTH the global hotkey (pynput sees no key
+        # events without it; it fails silently) and CGEvent typing. Ask
+        # macOS to show its prompt so the app lands in the list directly.
+        need_hotkey = bool(self.cfg.hotkey)
+        if self.cfg.pipe and not need_hotkey:
             return
-        trusted = accessibility_trusted()
+        trusted = accessibility_trusted(prompt=True)
         if trusted is False:
+            self.accessibility_missing = True
             self._err(
-                "Accessibility permission missing — text CANNOT be typed. "
-                "Settings > Privacy & Security > Accessibility > allow your "
-                "terminal, then restart."
+                "Accessibility permission missing: the hotkey will NOT be "
+                "heard and text CANNOT be typed. System Settings > Privacy & "
+                "Security > Accessibility > enable the app that runs parlando "
+                "(Parlando.app, or your terminal), then restart parlando."
             )
 
     def _render_status(self) -> None:

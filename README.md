@@ -28,7 +28,7 @@ audio never leaves your machine.
   contextual fillers ("you know", "yani"), stutters and false starts, and
   fixes punctuation — guarded so it can only *edit* your words, never
   answer them.
-- **Menu bar app** — <img src="https://raw.githubusercontent.com/furkanc/parlando/main/assets/menubar-states.png" alt="menu bar icon states: idle, recording, paused" height="26" align="top"> (idle · recording · paused) with start/stop, language switcher, and start-at-login support.
+- **Menu bar app** — <img src="https://raw.githubusercontent.com/furkanc/parlando/main/assets/menubar-states.png" alt="menu bar icon states: idle, recording, paused" height="26" align="top"> (idle · recording · paused) with start/stop, language switcher, and start-at-login support. `--install-app` creates a real `Parlando.app` <img src="https://raw.githubusercontent.com/furkanc/parlando/main/assets/app-icon.png" alt="Parlando app icon" height="22" align="top"> so macOS permissions belong to Parlando, not to your terminal.
 - **Self-healing** — audio watchdog survives sleep/wake and device changes;
   inference errors never kill the session.
 - **Streaming mode (optional)** — words appear as you speak, stabilized with
@@ -95,16 +95,27 @@ parlando --terminal # ...or dictate from this terminal window
 
 ### Permissions (one-time)
 
-macOS will ask for two permissions, granted to the app that runs parlando
-(Terminal, iTerm, VS Code, ...):
+macOS asks for two permissions and grants them to the *responsible app*:
+**Parlando** when you use `Parlando.app`, otherwise the terminal you run
+parlando from (Terminal, iTerm, VS Code, ...). This is why the app bundle is
+recommended: the permission is asked once, in Parlando's name, and keeps
+working whichever terminal you use.
 
 | Permission | Why | Where |
 |------------|-----|-------|
 | Microphone | hear you | Settings → Privacy & Security → Microphone |
-| Accessibility | type keystrokes + global hotkey | Settings → Privacy & Security → Accessibility |
+| Accessibility | global hotkey **and** typing keystrokes | Settings → Privacy & Security → Accessibility |
 
-parlando detects missing permissions and tells you explicitly instead of
-failing silently.
+parlando triggers the system prompts itself, detects missing permissions and
+says so explicitly (in the terminal, or in a dialog from the menu bar app)
+instead of failing silently. Without Accessibility the hotkey is not heard at
+all. After granting a permission, quit and reopen parlando once.
+
+`Parlando.app` is a thin launcher (Info.plist, icon, a Mach-O stub and a
+script that runs the installed package) generated on your Mac and ad-hoc
+signed, so nothing is downloaded and no developer certificate is needed.
+Re-run `--install-app` after moving the Python environment that owns the
+package; it is not needed after `uv tool upgrade parlando`.
 
 ## Usage
 
@@ -119,6 +130,8 @@ parlando -t --mode stream        # live word-by-word streaming
 parlando --pipe                  # print to stdout (scriptable; implies --terminal)
 parlando -t --hotkey cmd_r       # tap right Command instead
 parlando --list-devices          # list microphones
+parlando --install-app           # create ~/Applications/Parlando.app (recommended)
+parlando --uninstall-app         # remove it (and the login item)
 ```
 
 ### Voice commands
@@ -175,7 +188,7 @@ you speak. More "live", more sensitive to room noise.
 | Symptom | Fix |
 |---|---|
 | Nothing typed, "only silence" warning | Grant microphone permission, restart |
-| Nothing typed, no warning | Grant Accessibility permission (see startup warning) |
+| Hotkey does nothing / nothing typed | Grant Accessibility to Parlando (or your terminal), then restart; the hotkey listener is silent without it |
 | Stalls after sleep | The watchdog reopens the stream within ~5 s automatically |
 | Ghost text while silent (stream mode) | `--energy-floor 0.008` or `--silero` |
 | Missing soft speech (stream mode) | `--energy-floor 0.002` |
@@ -221,12 +234,15 @@ Key decisions (each one earned by a real failure during development):
 ```bash
 uvx --with numpy pytest tests -q   # unit tests; no model/mic needed
 uv run scripts/eval_polish.py      # polish quality benchmark (real local LLM)
+uv run scripts/make_icons.py       # regenerate icons, banner, Parlando.icns
+scripts/build_launcher.sh          # rebuild the Parlando.app Mach-O stub
 uv build                           # build the wheel/sdist
 ```
 
-Package layout: `src/parlando/` (engine, menubar, ASR engine). Entry point
-`parlando` (menu bar app by default, `--terminal` for the CLI);
-`parlando-menubar` is kept as an alias. CI runs the test suite and a packaging
+Package layout: `src/parlando/` (engine, menubar, ASR engine, assets incl.
+the prebuilt app launcher). Entry point `parlando` (menu bar app by default,
+`--terminal` for the CLI); `parlando-menubar` is kept as an alias. CI runs
+the test suite and a packaging
 build on macOS via GitHub Actions.
 
 ## Roadmap

@@ -1,5 +1,5 @@
 # /// script
-# requires-python = ">=3.10"
+# requires-python = ">=3.11"
 # dependencies = ["pillow"]
 # ///
 """Generate the parlando brand assets.
@@ -7,6 +7,8 @@
 - Menu bar template icons (black + alpha; macOS recolors them for
   light/dark): a three-bar speech waveform with state badges.
 - README banner with the wordmark and a live insertion caret.
+- macOS app icon (Parlando.icns) for the generated Parlando.app bundle:
+  Big Sur-style rounded square on the brand card, wave mark in the accent.
 
 Drawn at 8x and downsampled for crisp edges.
 
@@ -15,7 +17,7 @@ Usage: uv run scripts/make_icons.py
 
 from pathlib import Path
 
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
 ROOT = Path(__file__).resolve().parent.parent
 ICON_OUT = ROOT / "src" / "parlando" / "assets"
@@ -173,12 +175,78 @@ def menubar_states_strip():
     print(f"wrote {out}")
 
 
+def app_icon():
+    """macOS app icon for Parlando.app (Big Sur grid: 824 px tile on 1024).
+
+    Drawn at 2x and downsampled. Pillow writes the multi-size .icns
+    directly, so the bundle needs no iconutil step at install time.
+    """
+    C = 1024 * 2                      # 2x canvas for anti-aliasing
+    tile = 824 * 2
+    margin = (C - tile) // 2
+    radius = int(tile * 0.2237)       # Apple's continuous-corner ratio
+    img = Image.new("RGBA", (C, C), (0, 0, 0, 0))
+
+    # Soft drop shadow, as in Apple's icon template.
+    shadow = Image.new("RGBA", (C, C), (0, 0, 0, 0))
+    sd = ImageDraw.Draw(shadow)
+    sd.rounded_rectangle(
+        [margin, margin + 28, margin + tile, margin + tile + 28],
+        radius=radius, fill=(0, 0, 0, 110),
+    )
+    shadow = shadow.filter(ImageFilter.GaussianBlur(36))
+    img.alpha_composite(shadow)
+
+    # Tile: vertical gradient from a slightly lifted top to the brand card.
+    top, bottom = (30, 29, 46), BG[:3]
+    grad = Image.new("RGBA", (C, C), (0, 0, 0, 0))
+    gp = grad.load()
+    for y in range(margin, margin + tile):
+        t = (y - margin) / tile
+        col = tuple(int(top[i] + (bottom[i] - top[i]) * t) for i in range(3)) + (255,)
+        for x in range(margin, margin + tile):
+            gp[x, y] = col
+    mask = Image.new("L", (C, C), 0)
+    ImageDraw.Draw(mask).rounded_rectangle(
+        [margin, margin, margin + tile, margin + tile], radius=radius, fill=255
+    )
+    img.paste(grad, (0, 0), mask)
+
+    # Thin inner highlight along the top edge for depth.
+    hl = Image.new("RGBA", (C, C), (0, 0, 0, 0))
+    ImageDraw.Draw(hl).rounded_rectangle(
+        [margin + 3, margin + 3, margin + tile - 3, margin + tile - 3],
+        radius=radius - 3, outline=(255, 255, 255, 28), width=6,
+    )
+    img.alpha_composite(hl)
+
+    # The wave mark, accent colored, ~52% of the tile width.
+    d = ImageDraw.Draw(img)
+    mscale = tile * 0.52 / MARK_W
+    ox = int((C - MARK_W * mscale) / 2)
+    draw_wave(d, ox, C // 2, mscale, ACCENT)
+
+    return img.resize((1024, 1024), Image.LANCZOS)
+
+
+def save_app_icon(img: Image.Image) -> None:
+    ICON_OUT.mkdir(parents=True, exist_ok=True)
+    icns = ICON_OUT / "Parlando.icns"
+    img.save(icns, format="ICNS")
+    print(f"wrote {icns}")
+    BANNER_OUT.mkdir(parents=True, exist_ok=True)
+    preview = BANNER_OUT / "app-icon.png"
+    img.resize((256, 256), Image.LANCZOS).save(preview)
+    print(f"wrote {preview}")
+
+
 def main() -> None:
     save_icon(icon_idle(), "mic.png")
     save_icon(icon_recording(), "mic-recording.png")
     save_icon(icon_paused(), "mic-paused.png")
     banner()
     menubar_states_strip()
+    save_app_icon(app_icon())
 
 
 if __name__ == "__main__":

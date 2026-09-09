@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.5.0 — 2026-09-09
+
+- **`Parlando.app`**: `parlando --install-app` generates a thin,
+  ad-hoc signed app bundle in `~/Applications` (Info.plist, app icon, a
+  prebuilt Mach-O stub that execs a launch script for the installed
+  package). Launched from Finder/Spotlight or the login item, Microphone
+  and Accessibility permissions are requested and stored as "Parlando"
+  instead of the terminal that happened to start it. `--uninstall-app`
+  removes it; `--install-login` now starts the app bundle.
+- Accessibility check now triggers the macOS prompt itself
+  (`AXIsProcessTrustedWithOptions`) and the warning states that the
+  hotkey is silent without the permission, not only typing. The menu bar
+  app shows this as a dialog.
+- New macOS app icon (`Parlando.icns`, `assets/app-icon.png`) from
+  `scripts/make_icons.py`; `scripts/launcher.c` + `build_launcher.sh`
+  for the stub.
+
 ## 0.4.2 — 2026-09-09
 
 - **`parlando` opens the menu bar app.** The terminal mode moved behind
