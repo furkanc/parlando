@@ -570,24 +570,35 @@ def run_menubar() -> int:
                     break
 
         def on_vocab_add(self, _item) -> None:
-            eng = engine_holder.get("engine")
-            if not eng:
-                return
-            win = rumps.Window(
-                message=(
-                    "Term the ASR should spell exactly as written\n"
-                    "(e.g. MLX, PyPI, Wispr Flow):"
-                ),
-                title="Add vocabulary term",
-                default_text="",
-                ok="Add",
-                cancel="Cancel",
-                dimensions=(260, 24),
+            # NOT rumps.Window: in an accessory (menu bar) app its modal can
+            # open invisibly BEHIND other windows and freeze the main thread
+            # (stuck "…" badge). The osascript dialog always comes frontmost.
+            script = (
+                'text returned of (display dialog '
+                '"Term the ASR should spell exactly as written '
+                '(e.g. MLX, PyPI, Wispr Flow):" '
+                'default answer "" '
+                'with title "parlando — add vocabulary term" '
+                'buttons {"Cancel", "Add"} default button "Add")'
             )
-            resp = win.run()
-            if getattr(resp, "clicked", 0) and resp.text.strip():
+            try:
+                result = subprocess.run(
+                    ["osascript", "-e", script],
+                    capture_output=True,
+                    text=True,
+                    timeout=180,
+                )
+            except subprocess.TimeoutExpired:
+                return
+            if result.returncode != 0:
+                return  # cancelled
+            term = result.stdout.strip()
+            if not term:
+                return
+            eng = engine_holder.get("engine")
+            if eng is not None:
                 # Active for the very next dictation; no restart needed.
-                eng.add_vocab_term(resp.text)
+                eng.add_vocab_term(term)
 
         def on_vocab_edit(self, _item) -> None:
             path = engine.VOCAB_FILE
