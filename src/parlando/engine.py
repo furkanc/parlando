@@ -132,7 +132,8 @@ def vocab_context(terms: list[str]) -> str:
         return ""
     return (
         "The speech may contain these terms; when heard, write them exactly "
-        "as spelled here: " + ", ".join(terms) + "."
+        "as spelled here: " + ", ".join(terms) + ". Only write a term if it "
+        "is actually spoken; if the audio is silent, output nothing."
     )
 
 LOGGER = logging.getLogger("parlando")
@@ -1189,6 +1190,18 @@ class DictationEngine:
         chunks.append(audio[start:])
         return [c for c in chunks if len(c) > 0]
 
+    def _recording_has_speech(self, audio: np.ndarray) -> bool:
+        """Does the recording contain at least MIN_SPEECH_MS of audio above
+        the energy floor? Deterministic; independent of the ASR."""
+        n = len(audio) // FRAME_SAMPLES
+        if n == 0:
+            return False
+        f32 = audio[: n * FRAME_SAMPLES].astype(np.float32) * INT16_SCALE
+        frames = f32.reshape(n, FRAME_SAMPLES)
+        rms = np.sqrt((frames * frames).mean(axis=1))
+        loud_frames = int((rms > max(self.cfg.energy_floor, 0.004)).sum())
+        return loud_frames * FRAME_MS >= MIN_SPEECH_MS
+
     async def _finalize_record(self) -> None:
         """Recording ended: transcribe it all (chunked if long), type once."""
         audio = (
@@ -1202,6 +1215,14 @@ class DictationEngine:
         self.rec_samples = 0
 
         if rec_seconds < 0.4:
+            self._set_phase("ready")
+            return
+
+        # Energy gate: a recording with no speech-level audio must never
+        # reach the ASR. On silence the model hallucinates — and with a
+        # vocabulary in its context it parrots exactly those terms.
+        if not self._recording_has_speech(audio):
+            self._info("(no speech in the recording)")
             self._set_phase("ready")
             return
 

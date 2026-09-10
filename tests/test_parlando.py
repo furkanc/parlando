@@ -1001,3 +1001,31 @@ def test_add_vocab_term(monkeypatch, tmp_path):
     assert eng.add_vocab_term("   ") is False   # boş reddedilir
     assert eng.add_vocab_term("PyPI") is True
     assert f.read_text(encoding="utf-8") == "MLX\nPyPI\n"
+
+
+def test_silent_recording_never_reaches_asr(monkeypatch, tmp_path):
+    """Sessiz kayıt ASR'a gitmez — sözlük terimleri halüsinasyonu (yaşandı)."""
+    monkeypatch.setattr(vt, "VOCAB_FILE", tmp_path / "nope.txt")
+    monkeypatch.setattr(subprocess, "Popen", lambda *a, **k: None)
+    eng = vt.DictationEngine(vt.Config(mode="record", vocab="MLX, PyPI"))
+    eng.typist = FakeTypist()
+
+    async def boom(_a):
+        raise AssertionError("silence must not reach ASR")
+
+    eng._asr = boom
+    eng.toggle_action()
+    for _ in range(80):  # ~2.4s sessizlik (ambiyans seviyesinde)
+        eng._on_frame((np.random.randn(480) * 20).astype(np.int16))
+    eng.toggle_action()
+    asyncio.new_event_loop().run_until_complete(eng._finalize_record())
+    assert eng.typist.out == []
+
+
+def test_recording_with_speech_passes_gate():
+    eng = vt.DictationEngine(vt.Config(mode="record"))
+    silence = np.zeros(16000, dtype=np.int16)
+    speech = (np.random.randn(16000) * 1000).astype(np.int16)  # rms ~0.03
+    assert eng._recording_has_speech(np.concatenate([silence, speech]))
+    assert not eng._recording_has_speech(silence)
+    assert not eng._recording_has_speech(np.zeros(100, dtype=np.int16))
