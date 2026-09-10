@@ -182,7 +182,7 @@ printf "MLX\nPyPI\nClaude Code\n" >> ~/.config/parlando/vocabulary.txt
 (one term per line, `#` comments allowed), or ad hoc:
 
 ```bash
-parlando -t --vocab "MLX, PyPI, Wispr Flow"
+parlando -t --vocab "MLX, PyPI"
 ```
 
 ### Models

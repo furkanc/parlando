@@ -576,7 +576,7 @@ def run_menubar() -> int:
             script = (
                 'text returned of (display dialog '
                 '"Term the ASR should spell exactly as written '
-                '(e.g. MLX, PyPI, Wispr Flow):" '
+                '(e.g. MLX, PyPI):" '
                 'default answer "" '
                 'with title "parlando — add vocabulary term" '
                 'buttons {"Cancel", "Add"} default button "Add")'
