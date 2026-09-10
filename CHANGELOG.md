@@ -8,6 +8,11 @@
   "MLX, PyPI"`, are injected into Qwen3-ASR's system prompt (context
   biasing), hinted to the polish LLM, and exempted from the polish
   guard's novel-word check so spelling corrections survive it.
+- Context-echo guard: on quiet audio the ASR could copy the injected
+  vocabulary context into the transcript verbatim; transcripts that are
+  a substring of (or consist almost entirely of) the injected context
+  are now dropped deterministically, and the context itself is a bare
+  term list (the model ignores instructions and parrots prose).
 - Record mode gained a deterministic energy gate: a recording with no
   speech-level audio never reaches the ASR (on silence the model
   hallucinates — with a vocabulary in context it parrots those terms).

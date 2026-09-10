@@ -960,7 +960,22 @@ def test_load_vocabulary_missing_file(monkeypatch, tmp_path):
 def test_vocab_context():
     assert vt.vocab_context([]) == ""
     ctx = vt.vocab_context(["MLX", "PyPI"])
-    assert "MLX, PyPI" in ctx and "exactly" in ctx
+    assert "MLX, PyPI" in ctx
+
+
+def test_context_echo_guard():
+    ctx = vt.vocab_context(["MLX", "PyPI", "Claude Code", "parlando"])
+    # tam yankı (yaşanan hata) ve liste yankısı düşer
+    assert vt.is_context_echo("Vocabulary: MLX, PyPI, Claude Code, parlando", ctx)
+    assert vt.is_context_echo("MLX, PyPI, Claude Code, parlando", ctx)
+    # tek/az kelimelik gerçek dikte asla düşmez
+    assert not vt.is_context_echo("MLX", ctx)
+    assert not vt.is_context_echo("MLX ve PyPI", ctx)
+    # sözlük terimi geçen gerçek cümle düşmez
+    assert not vt.is_context_echo(
+        "we should ship MLX support to PyPI tomorrow evening", ctx)
+    assert not vt.is_context_echo("", ctx)
+    assert not vt.is_context_echo("anything", "")
 
 
 def test_polish_guard_allows_vocab_correction():

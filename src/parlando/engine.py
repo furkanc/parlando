@@ -130,11 +130,33 @@ def vocab_context(terms: list[str]) -> str:
     """System-prompt context that biases Qwen3-ASR toward exact spellings."""
     if not terms:
         return ""
-    return (
-        "The speech may contain these terms; when heard, write them exactly "
-        "as spelled here: " + ", ".join(terms) + ". Only write a term if it "
-        "is actually spoken; if the audio is silent, output nothing."
-    )
+    # Deliberately minimal: Qwen3-ASR biases toward context text but does
+    # not follow instructions — prose here just becomes parroting material
+    # when the audio is quiet (it once typed the whole sentence verbatim).
+    # The echo guard (is_context_echo) is the real protection.
+    return "Vocabulary: " + ", ".join(terms)
+
+
+def is_context_echo(text: str, context: str) -> bool:
+    """Did the ASR echo its own context instead of transcribing?
+
+    On quiet/contentless audio the decoder can copy the injected vocabulary
+    context into the transcript. We know the exact injected string, so this
+    is decidable: drop transcripts that are a substring of the context or
+    consist almost entirely of context words. Short outputs are never
+    dropped — dictating a single vocabulary term must keep working.
+    """
+    if not text or not context:
+        return False
+    tw = [_bare(w) for w in text.split() if _bare(w)]
+    if len(tw) < 4:
+        return False
+    ctx_words = [_bare(w) for w in context.split() if _bare(w)]
+    if " ".join(tw) in " ".join(ctx_words):
+        return True
+    ctx_set = set(ctx_words)
+    inside = sum(1 for w in tw if w in ctx_set)
+    return len(tw) >= 6 and inside / len(tw) >= 0.85
 
 LOGGER = logging.getLogger("parlando")
 
@@ -1059,6 +1081,7 @@ class DictationEngine:
         audio = audio_int16.astype(np.float32) * INT16_SCALE
         if self.cfg.normalize:
             audio = self._normalize_audio(audio)
+        ctx = vocab_context(list(self.vocab_terms))
         parts = []
         with self._stt._suppress_output():
             for token in self._stt.transcribe(
@@ -1067,10 +1090,14 @@ class DictationEngine:
                 self.feature_extractor,
                 audio,
                 self.cfg.language,
-                context=vocab_context(list(self.vocab_terms)),
+                context=ctx,
             ):
                 parts.append(token)
-        return "".join(parts).strip()
+        text = "".join(parts).strip()
+        if is_context_echo(text, ctx):
+            LOGGER.info("dropped context echo: %s", text)
+            return ""
+        return text
 
     async def _asr(self, audio_int16: np.ndarray) -> str:
         """ASR; an error must never kill the loop."""
