@@ -1,13 +1,7 @@
 # Changelog
 
-## 0.6.0 — 2026-09-10
+## 0.6.1 — 2026-09-10
 
-- **Personal vocabulary**: technical terms are no longer spelled
-  phonetically ("MLX" -> "Meleiks"). Terms come from
-  `~/.config/parlando/vocabulary.txt` (one per line) and/or `--vocab
-  "MLX, PyPI"`, are injected into Qwen3-ASR's system prompt (context
-  biasing), hinted to the polish LLM, and exempted from the polish
-  guard's novel-word check so spelling corrections survive it.
 - Context-echo guard: on quiet audio the ASR could copy the injected
   vocabulary context into the transcript verbatim; transcripts that are
   a substring of (or consist almost entirely of) the injected context
@@ -16,6 +10,15 @@
 - Record mode gained a deterministic energy gate: a recording with no
   speech-level audio never reaches the ASR (on silence the model
   hallucinates — with a vocabulary in context it parrots those terms).
+
+## 0.6.0 — 2026-09-10
+
+- **Personal vocabulary**: technical terms are no longer spelled
+  phonetically ("MLX" -> "Meleiks"). Terms come from
+  `~/.config/parlando/vocabulary.txt` (one per line) and/or `--vocab
+  "MLX, PyPI"`, are injected into Qwen3-ASR's system prompt (context
+  biasing), hinted to the polish LLM, and exempted from the polish
+  guard's novel-word check so spelling corrections survive it.
 - Vocabulary is editable from the menu bar (Vocabulary → Add Term… /
   Edit Vocabulary File…) and hot-reloads on file change — edits are
   live at the next recording, no restart.
