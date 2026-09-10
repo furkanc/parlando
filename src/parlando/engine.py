@@ -93,6 +93,47 @@ MAX_RECORD_SECONDS = 120     # hard safety cap for record mode
 CHUNK_SECONDS = 28           # model window; longer recordings are split
 ENTER_TOKEN = ""       # invisible marker for the "send" voice command
 LOG_PATH = Path.home() / "Library" / "Logs" / "parlando.log"
+VOCAB_FILE = Path.home() / ".config" / "parlando" / "vocabulary.txt"
+
+
+def load_vocabulary(extra: str = "") -> list[str]:
+    """Personal vocabulary: exact spellings the ASR should preserve.
+
+    Merges ~/.config/parlando/vocabulary.txt (one term per line, `#`
+    comments allowed) with the comma-separated `--vocab` argument. Fixes
+    the classic ASR failure of spelling technical terms phonetically
+    ("MLX" -> "Meleiks").
+    """
+    terms: list[str] = []
+    try:
+        if VOCAB_FILE.exists():
+            for line in VOCAB_FILE.read_text(encoding="utf-8").splitlines():
+                line = line.strip()
+                if line and not line.startswith("#"):
+                    terms.append(line)
+    except OSError:
+        pass
+    for t in extra.split(","):
+        t = t.strip()
+        if t:
+            terms.append(t)
+    seen: set = set()
+    unique = []
+    for t in terms:
+        if t.lower() not in seen:
+            seen.add(t.lower())
+            unique.append(t)
+    return unique
+
+
+def vocab_context(terms: list[str]) -> str:
+    """System-prompt context that biases Qwen3-ASR toward exact spellings."""
+    if not terms:
+        return ""
+    return (
+        "The speech may contain these terms; when heard, write them exactly "
+        "as spelled here: " + ", ".join(terms) + "."
+    )
 
 LOGGER = logging.getLogger("parlando")
 
@@ -117,6 +158,7 @@ class Config:
     cleanup: bool = True         # drop unambiguous vocalized fillers (um, eee)
     polish: bool = False         # LLM cleanup pass at finalize (record mode)
     polish_model: str = "mlx-community/Qwen3-1.7B-4bit"
+    vocab: str = ""              # extra terms, comma-separated (adds to file)
     silero: bool = False         # hybrid Silero VAD
     start_paused: bool = False
     # "record": tap to start/stop, transcribe once (default; most robust).
@@ -346,7 +388,7 @@ POLISH_PROMPT = (
 )
 
 
-def polish_guard(raw: str, polished: str) -> bool:
+def polish_guard(raw: str, polished: str, allowed: tuple = ()) -> bool:
     """Accept the LLM's rewrite only if it stayed an *edit* of the input.
 
     Rejects answers/hallucinations: nearly all polished words must already
@@ -368,17 +410,26 @@ def polish_guard(raw: str, polished: str) -> bool:
     # No novel words: an *edit* only removes/reorders/repunctuates. Answers
     # sneak past overlap checks by reusing the question's words plus a few
     # new ones ("...is Paris") — those new words are exactly the tell.
-    novel = sum(1 for w in pw if w not in set(rw))
+    # Personal-vocabulary terms are exempt so a spelling correction
+    # ("Meleiks" -> "MLX") is not mistaken for an addition.
+    allowed_bare = {_bare(w) for w in allowed}
+    novel = sum(1 for w in pw if w not in set(rw) and w not in allowed_bare)
     return novel <= len(rw) // 15
 
 
-def polish_text(llm, tokenizer, text: str) -> str:
+def polish_text(llm, tokenizer, text: str, vocab: tuple = ()) -> str:
     """Run the cleanup LLM over `text`; returns raw text if unusable."""
     import re
 
     from mlx_lm.generate import generate
 
-    messages = [{"role": "user", "content": POLISH_PROMPT.format(text=text)}]
+    task = POLISH_PROMPT.format(text=text)
+    if vocab:
+        task = (
+            "Technical terms — if a word sounds like one of these, spell it "
+            "exactly as written here: " + ", ".join(vocab) + ".\n\n" + task
+        )
+    messages = [{"role": "user", "content": task}]
     prompt = tokenizer.apply_chat_template(
         messages, tokenize=False, add_generation_prompt=True
     )
@@ -386,7 +437,7 @@ def polish_text(llm, tokenizer, text: str) -> str:
     response = generate(llm, tokenizer, prompt, max_tokens=max_tokens, verbose=False)
     response = re.sub(r"<think>.*?</think>", "", response, flags=re.DOTALL).strip()
     response = response.strip('"“”').strip()
-    if response and polish_guard(text, response):
+    if response and polish_guard(text, response, allowed=vocab):
         return response
     return text
 
@@ -750,6 +801,7 @@ class DictationEngine:
 
         self.committer = WordCommitter()
         self.typist = None  # created in run()
+        self.vocab_terms = tuple(load_vocabulary(cfg.vocab))
 
         self.model = None
         self.tokenizer = None
@@ -969,6 +1021,7 @@ class DictationEngine:
                 self.feature_extractor,
                 audio,
                 self.cfg.language,
+                context=vocab_context(list(self.vocab_terms)),
             ):
                 parts.append(token)
         return "".join(parts).strip()
@@ -1135,7 +1188,7 @@ class DictationEngine:
                 self.status.detail = "polishing"
                 try:
                     polished = await asyncio.to_thread(
-                        polish_text, self.llm, self.llm_tokenizer, plain
+                        polish_text, self.llm, self.llm_tokenizer, plain, self.vocab_terms
                     )
                     words = polished.split() + ([ENTER_TOKEN] if wants_enter else [])
                 except Exception as exc:  # noqa: BLE001
@@ -1578,6 +1631,9 @@ def build_arg_parser() -> argparse.ArgumentParser:
     g.add_argument("--no-hotkey", action="store_true", help="Disable the hotkey")
     g.add_argument("--no-commands", action="store_true",
                    help="Disable voice commands (period, new line, send)")
+    g.add_argument("--vocab", default=Config.vocab,
+                   help="Comma-separated terms to spell exactly (adds to "
+                        "~/.config/parlando/vocabulary.txt)")
     g.add_argument("--no-cleanup", action="store_true",
                    help="Keep vocalized fillers (um, uh, eee) in the output")
     g.add_argument("--polish", action="store_true",
@@ -1634,6 +1690,7 @@ def config_from_args(args: argparse.Namespace) -> Config:
         hotkey=None if args.no_hotkey else args.hotkey,
         commands=not args.no_commands,
         cleanup=not args.no_cleanup,
+        vocab=args.vocab,
         polish=args.polish,
         polish_model=args.polish_model,
         silero=args.silero,

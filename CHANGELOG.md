@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.6.0 — 2026-09-10
+
+- **Personal vocabulary**: technical terms are no longer spelled
+  phonetically ("MLX" -> "Meleiks"). Terms come from
+  `~/.config/parlando/vocabulary.txt` (one per line) and/or `--vocab
+  "MLX, PyPI"`, are injected into Qwen3-ASR's system prompt (context
+  biasing), hinted to the polish LLM, and exempted from the polish
+  guard's novel-word check so spelling corrections survive it.
+
 ## 0.5.0 — 2026-09-09
 
 - **`Parlando.app`**: `parlando --install-app` generates a thin,

@@ -163,6 +163,24 @@ parlando --list-devices          # list microphones
 
 Disable with `--no-commands`.
 
+### Custom vocabulary
+
+ASR models spell unknown technical terms phonetically ("MLX" can come out
+as "Meleiks"). Give parlando your vocabulary and it biases recognition
+toward the exact spellings — injected into the ASR context and honored by
+`--polish` too:
+
+```bash
+mkdir -p ~/.config/parlando
+printf "MLX\nPyPI\nClaude Code\n" >> ~/.config/parlando/vocabulary.txt
+```
+
+(one term per line, `#` comments allowed), or ad hoc:
+
+```bash
+parlando -t --vocab "MLX, PyPI, Wispr Flow"
+```
+
 ### Models
 
 **Speech recognition** (`--model`, MLX Qwen3-ASR — 30 languages):
@@ -279,7 +297,7 @@ experiments). Until then, install with `uv`.
 - [x] Publish to PyPI (`uvx parlando` works)
 - [ ] Homebrew tap (`brew install parlando`)
 - [ ] End-to-end regression tests with recorded WAV fixtures
-- [ ] Custom vocabulary / context biasing
+- [x] Custom vocabulary / context biasing (`--vocab`, vocabulary.txt)
 
 ## License & credits
 

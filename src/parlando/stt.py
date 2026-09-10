@@ -894,8 +894,13 @@ def transcribe(
         audio: np.ndarray,
         language: str = "English",
         max_tokens: int = 8192,
+        context: str = "",
 ) -> Generator[str, None, None]:
-    """Stream tokens to keep transcription latency low."""
+    """Stream tokens to keep transcription latency low.
+
+    `context` is injected into the system prompt; Qwen3-ASR uses it to bias
+    transcription (e.g. exact spellings of technical vocabulary).
+    """
     from mlx_lm.generate import generate_step
 
     # Match the model's expected feature pipeline.
@@ -921,7 +926,7 @@ def transcribe(
     lang_name = supported_lower.get(language.lower(), language)
 
     prompt = (
-        f"<|im_start|>system\n<|im_end|>\n"
+        f"<|im_start|>system\n{context}<|im_end|>\n"
         f"<|im_start|>user\n<|audio_start|>{'<|audio_pad|>' * num_audio_tokens}<|audio_end|><|im_end|>\n"
         f"<|im_start|>assistant\nlanguage {lang_name}<asr_text>"
     )

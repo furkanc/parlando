@@ -936,3 +936,42 @@ def test_relaunch_guard_inactive_outside_bundle(monkeypatch):
     assert not g.active
     monkeypatch.setenv("PARLANDO_APP_BUNDLE", "/Applications/Parlando.app")
     assert menubar.app_bundle_path() == Path("/Applications/Parlando.app")
+
+
+# -----------------------------------------------------------------------------
+# Personal vocabulary (ASR context biasing)
+# -----------------------------------------------------------------------------
+
+
+def test_load_vocabulary_merges_and_dedupes(monkeypatch, tmp_path):
+    f = tmp_path / "vocabulary.txt"
+    f.write_text("MLX\n# comment\nPyPI\n\nClaude Code\n", encoding="utf-8")
+    monkeypatch.setattr(vt, "VOCAB_FILE", f)
+    terms = vt.load_vocabulary("uv, mlx, Wispr Flow")
+    assert terms == ["MLX", "PyPI", "Claude Code", "uv", "Wispr Flow"]  # mlx dedup
+
+
+def test_load_vocabulary_missing_file(monkeypatch, tmp_path):
+    monkeypatch.setattr(vt, "VOCAB_FILE", tmp_path / "nope.txt")
+    assert vt.load_vocabulary("MLX") == ["MLX"]
+    assert vt.load_vocabulary() == []
+
+
+def test_vocab_context():
+    assert vt.vocab_context([]) == ""
+    ctx = vt.vocab_context(["MLX", "PyPI"])
+    assert "MLX, PyPI" in ctx and "exactly" in ctx
+
+
+def test_polish_guard_allows_vocab_correction():
+    """'Meleiks' -> 'MLX' is a spelling fix, not a hallucinated addition."""
+    raw = "we use meleiks for on device inference"
+    fixed = "We use MLX for on device inference."
+    assert not vt.polish_guard(raw, fixed)                     # vocab yokken red
+    assert vt.polish_guard(raw, fixed, allowed=("MLX",))       # vocab ile kabul
+
+
+def test_engine_loads_vocab_from_config(monkeypatch, tmp_path):
+    monkeypatch.setattr(vt, "VOCAB_FILE", tmp_path / "nope.txt")
+    eng = vt.DictationEngine(vt.Config(vocab="MLX, uv"))
+    assert eng.vocab_terms == ("MLX", "uv")
