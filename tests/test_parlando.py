@@ -975,3 +975,29 @@ def test_engine_loads_vocab_from_config(monkeypatch, tmp_path):
     monkeypatch.setattr(vt, "VOCAB_FILE", tmp_path / "nope.txt")
     eng = vt.DictationEngine(vt.Config(vocab="MLX, uv"))
     assert eng.vocab_terms == ("MLX", "uv")
+
+
+def test_vocab_hot_reload(monkeypatch, tmp_path):
+    f = tmp_path / "vocabulary.txt"
+    f.write_text("MLX\n", encoding="utf-8")
+    monkeypatch.setattr(vt, "VOCAB_FILE", f)
+    eng = vt.DictationEngine(vt.Config())
+    assert eng.vocab_terms == ("MLX",)
+    # dosya değişir -> mtime farkı -> yeniden yüklenir
+    f.write_text("MLX\nPyPI\n", encoding="utf-8")
+    import os
+    os.utime(f, (f.stat().st_atime, f.stat().st_mtime + 5))
+    eng.reload_vocab_if_changed()
+    assert eng.vocab_terms == ("MLX", "PyPI")
+
+
+def test_add_vocab_term(monkeypatch, tmp_path):
+    f = tmp_path / "vocabulary.txt"
+    monkeypatch.setattr(vt, "VOCAB_FILE", f)
+    eng = vt.DictationEngine(vt.Config())
+    assert eng.add_vocab_term("  MLX  ") is True
+    assert eng.vocab_terms == ("MLX",)
+    assert eng.add_vocab_term("mlx") is False   # tekrar eklenmez
+    assert eng.add_vocab_term("   ") is False   # boş reddedilir
+    assert eng.add_vocab_term("PyPI") is True
+    assert f.read_text(encoding="utf-8") == "MLX\nPyPI\n"

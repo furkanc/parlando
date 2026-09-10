@@ -8,6 +8,9 @@
   "MLX, PyPI"`, are injected into Qwen3-ASR's system prompt (context
   biasing), hinted to the polish LLM, and exempted from the polish
   guard's novel-word check so spelling corrections survive it.
+- Vocabulary is editable from the menu bar (Vocabulary → Add Term… /
+  Edit Vocabulary File…) and hot-reloads on file change — edits are
+  live at the next recording, no restart.
 
 ## 0.5.0 — 2026-09-09
 

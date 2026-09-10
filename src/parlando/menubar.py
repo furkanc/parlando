@@ -468,6 +468,12 @@ def run_menubar() -> int:
                 self.toggle_item,
                 self.enter_item,
                 {"Language": list(self.lang_items.values())},
+                {"Vocabulary": [
+                    rumps.MenuItem("Add Term…", callback=self.on_vocab_add),
+                    rumps.MenuItem(
+                        "Edit Vocabulary File…", callback=self.on_vocab_edit
+                    ),
+                ]},
                 None,
                 rumps.MenuItem("Open log file", callback=self.on_log),
                 rumps.MenuItem("Quit", callback=self.on_quit),
@@ -562,6 +568,42 @@ def run_menubar() -> int:
                     eng.cfg.language = lang
                     engine.LOGGER.info("language changed: %s", lang)
                     break
+
+        def on_vocab_add(self, _item) -> None:
+            eng = engine_holder.get("engine")
+            if not eng:
+                return
+            win = rumps.Window(
+                message=(
+                    "Term the ASR should spell exactly as written\n"
+                    "(e.g. MLX, PyPI, Wispr Flow):"
+                ),
+                title="Add vocabulary term",
+                default_text="",
+                ok="Add",
+                cancel="Cancel",
+                dimensions=(260, 24),
+            )
+            resp = win.run()
+            if getattr(resp, "clicked", 0) and resp.text.strip():
+                # Active for the very next dictation; no restart needed.
+                eng.add_vocab_term(resp.text)
+
+        def on_vocab_edit(self, _item) -> None:
+            path = engine.VOCAB_FILE
+            try:
+                path.parent.mkdir(parents=True, exist_ok=True)
+                if not path.exists():
+                    path.write_text(
+                        "# parlando vocabulary — one term per line.\n"
+                        "# The ASR writes these exactly as spelled here.\n",
+                        encoding="utf-8",
+                    )
+            except OSError:
+                pass
+            # -t: open in the default text editor. Saved edits are picked up
+            # automatically at the next recording (mtime check).
+            subprocess.run(["open", "-t", str(path)], check=False)
 
         def on_log(self, _item) -> None:
             subprocess.run(["open", str(engine.LOG_PATH)], check=False)

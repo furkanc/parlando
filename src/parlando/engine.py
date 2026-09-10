@@ -802,6 +802,7 @@ class DictationEngine:
         self.committer = WordCommitter()
         self.typist = None  # created in run()
         self.vocab_terms = tuple(load_vocabulary(cfg.vocab))
+        self._vocab_mtime = self._vocab_file_mtime()
 
         self.model = None
         self.tokenizer = None
@@ -890,6 +891,49 @@ class DictationEngine:
         LOGGER.info("dictation %s", "paused" if self.paused else "resumed")
         self._set_phase("paused" if self.paused else "ready")
 
+    def _vocab_file_mtime(self) -> float:
+        try:
+            return VOCAB_FILE.stat().st_mtime
+        except OSError:
+            return 0.0
+
+    def reload_vocab_if_changed(self) -> None:
+        """Pick up edits to the vocabulary file without a restart.
+
+        A cheap mtime check; called when a recording starts, so an edit is
+        live by the next dictation.
+        """
+        mtime = self._vocab_file_mtime()
+        if mtime != self._vocab_mtime:
+            self._vocab_mtime = mtime
+            self.vocab_terms = tuple(load_vocabulary(self.cfg.vocab))
+            LOGGER.info("vocabulary reloaded: %d terms", len(self.vocab_terms))
+
+    def add_vocab_term(self, term: str) -> bool:
+        """Append a term to the vocabulary file and activate it immediately.
+
+        Used by the menu bar's "Add Term…"; returns False for empty or
+        already-known terms.
+        """
+        term = term.strip()
+        if not term or term.lower() in {t.lower() for t in self.vocab_terms}:
+            return False
+        try:
+            VOCAB_FILE.parent.mkdir(parents=True, exist_ok=True)
+            existing = (
+                VOCAB_FILE.read_text(encoding="utf-8") if VOCAB_FILE.exists() else ""
+            )
+            sep = "" if (not existing or existing.endswith("\n")) else "\n"
+            with open(VOCAB_FILE, "a", encoding="utf-8") as fh:
+                fh.write(f"{sep}{term}\n")
+        except OSError as exc:
+            LOGGER.error("could not write vocabulary file: %r", exc)
+            return False
+        self._vocab_mtime = self._vocab_file_mtime()
+        self.vocab_terms = tuple(load_vocabulary(self.cfg.vocab))
+        LOGGER.info("vocabulary term added: %s", term)
+        return True
+
     def toggle_record(self) -> None:
         """Record-mode hotkey: start recording / stop and type."""
         if self.recording:
@@ -897,6 +941,7 @@ class DictationEngine:
             self._rec_finalize = True
             sound = "Bottle"
         else:
+            self.reload_vocab_if_changed()
             self.recording = True
             self.rec_frames = []
             self.rec_samples = 0
@@ -1101,6 +1146,7 @@ class DictationEngine:
         event = self.vad.update(rms, prob)
 
         if event == "start":
+            self.reload_vocab_if_changed()
             self.utt = list(self.preroll)
             self.utt.append(frame)
             self.utt_samples = sum(len(f) for f in self.utt)

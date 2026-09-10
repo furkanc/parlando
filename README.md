@@ -168,7 +168,11 @@ Disable with `--no-commands`.
 ASR models spell unknown technical terms phonetically ("MLX" can come out
 as "Meleiks"). Give parlando your vocabulary and it biases recognition
 toward the exact spellings — injected into the ASR context and honored by
-`--polish` too:
+`--polish` too.
+
+Easiest way: menu bar → **Vocabulary → Add Term…** (active for the very
+next dictation) or **Edit Vocabulary File…** for bulk edits. Changes are
+picked up automatically — no restart. The same file by hand:
 
 ```bash
 mkdir -p ~/.config/parlando
