@@ -12,14 +12,23 @@ audio never leaves your machine.
 
 ## Features
 
-- **Fully local & offline** — MLX-accelerated Qwen3-ASR on the Apple Neural
+- **Fully local & offline** — MLX-accelerated Whisper or Qwen3-ASR on the Apple Neural
   stack; works on a plane, nothing is uploaded, no API keys.
 - **Tap-to-dictate** — single tap of right ⌥ Option starts/stops recording
   (the same pattern superwhisper and Wispr Flow use). No always-on mic.
 - **Types anywhere** — text is delivered as native keyboard events (Quartz
   CGEvent unicode), so it works in any app, editor, terminal, or chat box.
-- **30 languages** — Turkish by default; switch instantly (e.g. `--language
-  English`) with no model reload.
+- **Multilingual** — Turkish by default; select **Language → Auto (detect language)**
+  to detect the spoken language, or select Turkish / English to fix it.
+  Switching needs no model reload. Menu language selection is remembered across restarts.
+- **Menu preferences** — click **Record** beside **Change hotkey**, then press
+  your shortcut (Escape cancels). A single modifier tap can use either the left
+  or right Command, Option, Control or Shift key. **Copy to clipboard** has a checkbox and an
+  inline duration field, such as `5` seconds. Enter mode also has a checkbox.
+  The hotkey, clipboard duration, copy toggle, language and Enter preference are saved locally.
+- **macOS keyboard stability** — Parlando's listener skips pynput 1.8.2's unused
+  background Carbon layout lookup, which can cause a native `SIGTRAP` during
+  startup or shortcut changes. The workaround is in the package and survives reinstalling.
 - **Voice commands** — "nokta", "virgül", "soru işareti", "yeni satır",
   "gönder" (presses Enter); the English set ("period", "comma", "question
   mark", "new line", "send") is active with `--language English`.
@@ -45,7 +54,8 @@ audio never leaves your machine.
 
 - macOS on Apple Silicon
 - [`uv`](https://docs.astral.sh/uv/) installed
-- ~2 GB disk for the default ASR model (downloaded once from Hugging Face)
+- ~3.1 GB disk for the default Whisper Large-v3 model, plus app dependencies
+  (downloaded once from Hugging Face)
 
 ## Installation
 
@@ -99,7 +109,7 @@ After `parlando --install-app`, open **Parlando** from Spotlight or
 Parlando's name instead of your terminal's, and stay granted across
 `uv tool upgrade parlando`.
 
-1. On first run the speech model (~2 GB) downloads once; after that
+1. On first run the speech model (~3.1 GB) downloads once; after that
    everything works offline.
 2. macOS will ask for **Microphone** and **Accessibility** permissions
    (see below) — grant them; parlando picks them up by itself.
@@ -187,11 +197,12 @@ parlando -t --vocab "MLX, PyPI"
 
 ### Models
 
-**Speech recognition** (`--model`, MLX Qwen3-ASR — 30 languages):
+**Speech recognition** (`--model`; select from **Speech model** in the menu bar):
 
 | Model | Size | Notes |
 |---|---|---|
-| `mlx-community/Qwen3-ASR-1.7B-8bit` | ~2 GB | **default** — best accuracy, recommended |
+| `mlx-community/whisper-large-v3-mlx` | ~3.1 GB | **default** — preferred for Turkish with English technical terms |
+| `mlx-community/Qwen3-ASR-1.7B-8bit` | ~2.5 GB | alternative Qwen engine |
 | `mlx-community/Qwen3-ASR-0.6B-8bit` | ~700 MB | good balance for low-RAM machines |
 | `mlx-community/Qwen3-ASR-0.6B-4bit` | ~400 MB | fastest, lowest accuracy |
 | `mlx-community/Qwen3-ASR-0.6B-bf16` | ~1.3 GB | higher fidelity 0.6B, more RAM |
@@ -216,8 +227,23 @@ All models download once from Hugging Face and are cached in
 
 **`record` (default)** — tap, speak freely (pauses are fine), tap again; the
 whole recording is transcribed once and typed in one go. Recordings longer
-than 28 s are split at natural silence points (2 min cap). This mode has no
+than 28 s are split at natural silence points (10 min cap). This mode has no
 VAD guessing, so it is the most robust.
+
+Final dictation is also copied to the clipboard for **3 seconds**, then the
+previous clipboard contents are restored. A new copy made by you or another
+app is preserved. Use the **Copy to clipboard** checkbox and its inline duration field in the menu bar,
+or pass `--no-clipboard` in terminal mode to disable this feature.
+
+```bash
+parlando -t --model mlx-community/whisper-large-v3-mlx
+parlando -t --backend qwen
+parlando -t --no-clipboard
+```
+
+Model selection in the menu bar applies to the current session; restarting
+returns to Whisper Large-v3. Local model directories can be used with an
+explicit `--backend whisper` or `--backend qwen`.
 
 **`stream`** — always listening; an energy VAD (hysteresis, adaptive noise
 floor, optional `--silero` hybrid) segments utterances and words appear as
@@ -247,7 +273,7 @@ microphone ── 30 ms frames ──▶ hotkey-gated recorder (record mode)
                               optional Silero hybrid, 300 ms pre-roll (stream)
                 │ segment boundaries
                 ▼
-        segment audio only ──▶ Qwen3-ASR (MLX, on-device GPU)
+        segment audio only ──▶ Whisper / Qwen3-ASR (MLX, on-device GPU)
                 │ readings
                 ▼
         LocalAgreement-2 ──▶ append-only word commits ──▶ CGEvent unicode
@@ -287,7 +313,7 @@ the prebuilt app launcher). Entry point `parlando` (menu bar app by default,
 the test suite and a packaging build on macOS via GitHub Actions.
 
 `scripts/build_app.sh` produces a self-contained `Parlando.app` + `.dmg`
-(embedded Python and dependencies, ~250 MB; the speech model still
+(embedded Python and dependencies; bundle size depends on dependency versions; the speech model still
 downloads on first run). It is not the supported distribution yet: a
 downloaded app needs Developer ID signing and notarization to open without
 a Gatekeeper detour, and a stable signing identity so permissions survive

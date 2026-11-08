@@ -35,6 +35,7 @@ classifiers = [
 dependencies = [
     "mlx>=0.22.0",
     "mlx-lm>=0.22.0",
+    "mlx-whisper>=0.4.3",
     "numpy",
     "sounddevice",
     "setuptools",
@@ -44,7 +45,7 @@ dependencies = [
     "rich",
     "pyobjc-framework-Quartz",
     "pyobjc-framework-ApplicationServices",
-    "pynput",
+    "pynput==1.8.2",  # Native listener workaround relies on this reviewed implementation.
     "onnxruntime",
     "rumps",
 ]
