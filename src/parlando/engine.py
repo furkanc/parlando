@@ -161,15 +161,15 @@ def is_context_echo(text: str, context: str) -> bool:
 LOGGER = logging.getLogger("parlando")
 
 SPEECH_MODELS = {
-    "Whisper Large-v3": "mlx-community/whisper-large-v3-mlx",
     "Qwen3-ASR 1.7B": "mlx-community/Qwen3-ASR-1.7B-8bit",
+    "Whisper Large-v3": "mlx-community/whisper-large-v3-mlx",
 }
 
 
 @dataclass
 class Config:
-    model: str = SPEECH_MODELS["Whisper Large-v3"]
-    backend: str = "whisper"
+    model: str = SPEECH_MODELS["Qwen3-ASR 1.7B"]
+    backend: str = "qwen"
     language: str = "Turkish"
     device: int | None = None
     interval: float = 0.5        # partial ASR cadence (s), stream mode
@@ -1477,7 +1477,31 @@ class DictationEngine:
         self._info(f"Downloaded {label} {name}.")
         return path
 
+    def _release_speech_model(self) -> None:
+        """Free the current speech model before another one is loaded.
+
+        mlx_whisper keeps its model in a process-wide cache (ModelHolder), so
+        dropping our own reference is not enough: after a Whisper -> Qwen
+        switch both models stayed resident (~3 GB extra). Releasing first also
+        avoids holding two models at the peak of a switch.
+        """
+        self.model = self.tokenizer = self.feature_extractor = None
+        holder = getattr(sys.modules.get("mlx_whisper.transcribe"), "ModelHolder", None)
+        if holder is not None:
+            holder.model = None
+            holder.model_path = None
+        import gc
+
+        gc.collect()
+        mx = sys.modules.get("mlx.core")
+        clear_cache = getattr(mx, "clear_cache", None) or getattr(
+            getattr(mx, "metal", None), "clear_cache", None
+        )
+        if clear_cache is not None:
+            clear_cache()
+
     async def _load_speech_model(self) -> None:
+        self._release_speech_model()
         self._set_phase("loading", f"speech model · {short_model_name(self.cfg.model)}")
         patterns = WHISPER_MODEL_PATTERNS if self.cfg.backend == "whisper" else ASR_MODEL_PATTERNS
         path = await self._ensure_model(self.cfg.model, patterns, "speech model")
@@ -1892,8 +1916,8 @@ def list_devices() -> None:
 
 def config_from_args(args: argparse.Namespace) -> Config:
     model = args.model
-    if args.backend == "qwen" and model == Config.model:
-        model = SPEECH_MODELS["Qwen3-ASR 1.7B"]
+    if args.backend == "whisper" and model == Config.model:
+        model = SPEECH_MODELS["Whisper Large-v3"]
     return Config(
         model=model,
         backend=args.backend or ("whisper" if "whisper" in model.lower() else "qwen"),

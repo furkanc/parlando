@@ -16,7 +16,8 @@ from parlando.clipboard import TemporaryClipboard
 def test_whisper_receives_audio_language_and_transcription_task(language, expected, tmp_path, monkeypatch):
     monkeypatch.setattr(engine, "VOCAB_FILE", tmp_path / "vocabulary.txt")
     calls = []
-    eng = engine.DictationEngine(engine.Config(language=language, vocab="BigQuery", normalize=False))
+    eng = engine.DictationEngine(engine.Config(
+        backend="whisper", language=language, vocab="BigQuery", normalize=False))
     eng.model = "/cached/whisper"
     eng._whisper = SimpleNamespace(transcribe=lambda audio, **kw: (
         calls.append((audio, kw)) or {"text": " BigQuery deployment "}
@@ -71,11 +72,40 @@ def test_hotkey_change_does_not_interrupt_recording():
     assert eng.cfg.hotkey == "alt_r"
 
 
-def test_cli_selects_qwen_default_and_can_disable_clipboard():
-    args = engine.build_arg_parser().parse_args(["-t", "--backend", "qwen", "--no-clipboard"])
+def test_cli_defaults_to_qwen_and_can_disable_clipboard():
+    args = engine.build_arg_parser().parse_args(["-t", "--no-clipboard"])
     cfg = engine.config_from_args(args)
     assert cfg.backend == "qwen" and "Qwen3-ASR" in cfg.model
     assert not cfg.copy_clipboard
+    assert engine.Config().backend == "qwen" and "Qwen3-ASR" in engine.Config().model
+
+
+def test_cli_backend_whisper_selects_whisper_model():
+    args = engine.build_arg_parser().parse_args(["-t", "--backend", "whisper"])
+    cfg = engine.config_from_args(args)
+    assert cfg.backend == "whisper" and "whisper" in cfg.model
+
+
+def test_model_switch_releases_cached_whisper_model(monkeypatch):
+    # mlx_whisper caches its model process-wide; switching to Qwen must drop
+    # it or both models stay resident (measured: 3.1 GB -> 5.6 GB).
+    holder = SimpleNamespace(model=object(), model_path="/cached/whisper")
+    monkeypatch.setitem(sys.modules, "mlx_whisper.transcribe", SimpleNamespace(ModelHolder=holder))
+    cleared = []
+    monkeypatch.setitem(sys.modules, "mlx.core", SimpleNamespace(clear_cache=lambda: cleared.append(1)))
+    eng = engine.DictationEngine(engine.Config(backend="whisper"))
+    eng.model, eng.tokenizer, eng.feature_extractor = "/cached/whisper", object(), object()
+    eng._release_speech_model()
+    assert holder.model is None and holder.model_path is None
+    assert eng.model is None and eng.tokenizer is None and eng.feature_extractor is None
+    assert cleared == [1]
+
+
+def test_release_does_not_import_whisper_for_qwen_only_users(monkeypatch):
+    monkeypatch.delitem(sys.modules, "mlx_whisper.transcribe", raising=False)
+    eng = engine.DictationEngine(engine.Config())
+    eng._release_speech_model()
+    assert "mlx_whisper.transcribe" not in sys.modules
 
 
 def test_recording_continues_past_two_minutes_then_stops_at_ten(monkeypatch):

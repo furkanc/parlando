@@ -5,7 +5,7 @@
 # same builds uv uses) with parlando and all dependencies installed into
 # it, under Contents/Resources/runtime. The main executable is the Mach-O
 # stub from scripts/launcher.c; launch.sh starts the embedded interpreter.
-# The ASR model is NOT embedded: it downloads on first run (~3.1 GB).
+# The ASR model is NOT embedded: it downloads on first run (~2 GB).
 #
 # Output: build/Parlando.app and build/Parlando-<version>.dmg
 # Requires: uv, macOS with codesign/hdiutil (stock).

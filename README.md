@@ -54,8 +54,8 @@ audio never leaves your machine.
 
 - macOS on Apple Silicon
 - [`uv`](https://docs.astral.sh/uv/) installed
-- ~3.1 GB disk for the default Whisper Large-v3 model, plus app dependencies
-  (downloaded once from Hugging Face)
+- ~2 GB disk for the default ASR model (downloaded once from Hugging Face;
+  ~3.1 GB more if you also select Whisper Large-v3)
 
 ## Installation
 
@@ -109,7 +109,7 @@ After `parlando --install-app`, open **Parlando** from Spotlight or
 Parlando's name instead of your terminal's, and stay granted across
 `uv tool upgrade parlando`.
 
-1. On first run the speech model (~3.1 GB) downloads once; after that
+1. On first run the speech model (~2 GB) downloads once; after that
    everything works offline.
 2. macOS will ask for **Microphone** and **Accessibility** permissions
    (see below) — grant them; parlando picks them up by itself.
@@ -201,8 +201,8 @@ parlando -t --vocab "MLX, PyPI"
 
 | Model | Size | Notes |
 |---|---|---|
-| `mlx-community/whisper-large-v3-mlx` | ~3.1 GB | **default** — preferred for Turkish with English technical terms |
-| `mlx-community/Qwen3-ASR-1.7B-8bit` | ~2.5 GB | alternative Qwen engine |
+| `mlx-community/Qwen3-ASR-1.7B-8bit` | ~2 GB | **default** — best accuracy, recommended |
+| `mlx-community/whisper-large-v3-mlx` | ~3.1 GB | optional Whisper engine (`--backend whisper`); slower |
 | `mlx-community/Qwen3-ASR-0.6B-8bit` | ~700 MB | good balance for low-RAM machines |
 | `mlx-community/Qwen3-ASR-0.6B-4bit` | ~400 MB | fastest, lowest accuracy |
 | `mlx-community/Qwen3-ASR-0.6B-bf16` | ~1.3 GB | higher fidelity 0.6B, more RAM |
@@ -236,13 +236,12 @@ app is preserved. Use the **Copy to clipboard** checkbox and its inline duration
 or pass `--no-clipboard` in terminal mode to disable this feature.
 
 ```bash
-parlando -t --model mlx-community/whisper-large-v3-mlx
-parlando -t --backend qwen
+parlando -t --backend whisper
 parlando -t --no-clipboard
 ```
 
 Model selection in the menu bar applies to the current session; restarting
-returns to Whisper Large-v3. Local model directories can be used with an
+returns to Qwen3-ASR. Local model directories can be used with an
 explicit `--backend whisper` or `--backend qwen`.
 
 **`stream`** — always listening; an energy VAD (hysteresis, adaptive noise

@@ -47,5 +47,5 @@ fi
 say "Installed. Next:"
 say "  parlando --install-app   # create ~/Applications/Parlando.app (recommended)"
 say "  parlando                 # menu bar app;  parlando --terminal for the CLI"
-say "First run downloads Whisper Large-v3 (~3.1 GB, one-time)."
+say "First run downloads the speech model (~2 GB, one-time)."
 say "macOS will ask for Microphone and Accessibility permissions."
