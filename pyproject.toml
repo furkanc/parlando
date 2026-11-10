@@ -35,7 +35,6 @@ classifiers = [
 dependencies = [
     "mlx>=0.22.0",
     "mlx-lm>=0.22.0",
-    "mlx-whisper>=0.4.3",
     "numpy",
     "sounddevice",
     "setuptools",
@@ -49,6 +48,11 @@ dependencies = [
     "onnxruntime",
     "rumps",
 ]
+
+[project.optional-dependencies]
+# Optional Whisper engine (`pip install "parlando[whisper]"`). mlx-whisper
+# hard-depends on torch (~580 MB), which the default Qwen engine never needs.
+whisper = ["mlx-whisper>=0.4.3"]
 
 [project.urls]
 Homepage = "https://github.com/furkanc/parlando"

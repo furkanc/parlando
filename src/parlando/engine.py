@@ -164,6 +164,15 @@ SPEECH_MODELS = {
     "Qwen3-ASR 1.7B": "mlx-community/Qwen3-ASR-1.7B-8bit",
     "Whisper Large-v3": "mlx-community/whisper-large-v3-mlx",
 }
+# Whisper is an optional extra: mlx-whisper hard-depends on torch (~580 MB),
+# which the default Qwen engine never needs.
+WHISPER_INSTALL_HINT = 'uv tool install "parlando[whisper]"'
+
+
+def whisper_available() -> bool:
+    import importlib.util
+
+    return importlib.util.find_spec("mlx_whisper") is not None
 
 
 @dataclass
@@ -1501,6 +1510,12 @@ class DictationEngine:
             clear_cache()
 
     async def _load_speech_model(self) -> None:
+        # Check before releasing the current model or downloading 3.1 GB.
+        if self.cfg.backend == "whisper" and not whisper_available():
+            raise RuntimeError(
+                f"Whisper is not installed (optional extra). Install it with: "
+                f"{WHISPER_INSTALL_HINT}"
+            )
         self._release_speech_model()
         self._set_phase("loading", f"speech model · {short_model_name(self.cfg.model)}")
         patterns = WHISPER_MODEL_PATTERNS if self.cfg.backend == "whisper" else ASR_MODEL_PATTERNS
@@ -1971,10 +1986,16 @@ def main() -> int:
             )
         return menubar.run_menubar()
 
+    cfg = config_from_args(args)
+    if cfg.backend == "whisper" and not whisper_available():
+        parser.error(
+            f"the Whisper engine is an optional extra; install it with: "
+            f"{WHISPER_INSTALL_HINT}"
+        )
     _setup_logging()
     LOGGER.info("parlando %s starting: %s", __version__, vars(args))
     try:
-        asyncio.run(DictationEngine(config_from_args(args)).run())
+        asyncio.run(DictationEngine(cfg).run())
     except KeyboardInterrupt:
         pass
     return 0

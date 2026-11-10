@@ -566,8 +566,18 @@ def run_menubar() -> int:
                 asr_name: rumps.MenuItem(label, callback=self.on_language)
                 for label, asr_name in LANGUAGES.items()
             }
+            # Whisper is an optional extra; without it the item stays visible
+            # but disabled, and says how to install it.
+            self.model_available = {
+                model: "whisper" not in model.lower() or engine.whisper_available()
+                for model in engine.SPEECH_MODELS.values()
+            }
             self.model_items = {
-                model: rumps.MenuItem(label, callback=self.on_model)
+                model: rumps.MenuItem(
+                    label if self.model_available[model]
+                    else f"{label} (needs parlando[whisper])",
+                    callback=self.on_model,
+                )
                 for label, model in engine.SPEECH_MODELS.items()
             }
             self.clipboard_item = rumps.MenuItem(
@@ -654,7 +664,8 @@ def run_menubar() -> int:
                 self._saved_preferences = preferences
             for model, item in self.model_items.items():
                 item.state = int(eng.cfg.model == model)
-                item.set_callback(self.on_model if can_switch else None)
+                usable = can_switch and self.model_available[model]
+                item.set_callback(self.on_model if usable else None)
 
             view = describe_status(eng)
             if self.title != view["badge"]:

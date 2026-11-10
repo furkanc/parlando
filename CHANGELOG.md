@@ -14,8 +14,10 @@
   and a keyboard shortcut recorder. Suspend dictation hotkeys during shortcut
   capture; remember menu preferences and use English language-menu labels.
 - Expose automatic language detection in the menu for Whisper and Qwen3-ASR.
-- Add optional local MLX Whisper support (Large-v3); Qwen3-ASR stays the
-  default. Switching models frees the previous one, including mlx_whisper's
+- Add optional local MLX Whisper support (Large-v3) as the `parlando[whisper]`
+  extra, so the default install does not pull in PyTorch; Qwen3-ASR stays the
+  default. Selecting Whisper without the extra fails early with an install
+  hint (before any download) and the menu item is disabled. Switching models frees the previous one, including mlx_whisper's
   process-wide model cache. The menu bar can switch between Qwen3-ASR and
   Large-v3 between recordings.
 - Raise the record-mode cap from two to ten minutes, retaining chunked

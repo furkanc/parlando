@@ -80,6 +80,13 @@ pipx install parlando        # isolated install, commands on PATH
 pip install parlando         # into your current Python environment
 ```
 
+The optional Whisper engine is an extra (it pulls in PyTorch, ~580 MB, which
+the default Qwen3-ASR engine does not need):
+
+```bash
+uv tool install "parlando[whisper]"   # or: pipx install "parlando[whisper]"
+```
+
 <details>
 <summary>Other ways: one-line installer · from source · uninstall</summary>
 
@@ -202,7 +209,7 @@ parlando -t --vocab "MLX, PyPI"
 | Model | Size | Notes |
 |---|---|---|
 | `mlx-community/Qwen3-ASR-1.7B-8bit` | ~2 GB | **default** — best accuracy, recommended |
-| `mlx-community/whisper-large-v3-mlx` | ~3.1 GB | optional Whisper engine (`--backend whisper`); slower |
+| `mlx-community/whisper-large-v3-mlx` | ~3.1 GB | optional Whisper engine (`--backend whisper`, needs `parlando[whisper]`); slower |
 | `mlx-community/Qwen3-ASR-0.6B-8bit` | ~700 MB | good balance for low-RAM machines |
 | `mlx-community/Qwen3-ASR-0.6B-4bit` | ~400 MB | fastest, lowest accuracy |
 | `mlx-community/Qwen3-ASR-0.6B-bf16` | ~1.3 GB | higher fidelity 0.6B, more RAM |

@@ -101,6 +101,34 @@ def test_model_switch_releases_cached_whisper_model(monkeypatch):
     assert cleared == [1]
 
 
+def test_whisper_without_extra_fails_before_release_or_download(monkeypatch):
+    # mlx-whisper is an optional extra: selecting Whisper without it must fail
+    # with an install hint, keep the current model, and never start a 3.1 GB
+    # download.
+    monkeypatch.setattr(engine, "whisper_available", lambda: False)
+    eng = engine.DictationEngine(engine.Config(backend="whisper"))
+    current = object()
+    eng.model = current
+
+    async def no_download(*_a, **_kw):
+        pytest.fail("download started without mlx-whisper installed")
+
+    eng._ensure_model = no_download
+    with pytest.raises(RuntimeError, match=r"parlando\[whisper\]"):
+        asyncio.run(eng._load_speech_model())
+    assert eng.model is current
+
+
+def test_whisper_extra_is_optional_dependency():
+    import tomllib
+    from pathlib import Path
+
+    meta = tomllib.loads(
+        (Path(__file__).resolve().parent.parent / "pyproject.toml").read_text())["project"]
+    assert not any("mlx-whisper" in d for d in meta["dependencies"])
+    assert any("mlx-whisper" in d for d in meta["optional-dependencies"]["whisper"])
+
+
 def test_release_does_not_import_whisper_for_qwen_only_users(monkeypatch):
     monkeypatch.delitem(sys.modules, "mlx_whisper.transcribe", raising=False)
     eng = engine.DictationEngine(engine.Config())
