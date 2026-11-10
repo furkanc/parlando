@@ -44,10 +44,15 @@ dependencies = [
     "rich",
     "pyobjc-framework-Quartz",
     "pyobjc-framework-ApplicationServices",
-    "pynput",
+    "pynput==1.8.2",  # Native listener workaround relies on this reviewed implementation.
     "onnxruntime",
     "rumps",
 ]
+
+[project.optional-dependencies]
+# Optional Whisper engine (`pip install "parlando[whisper]"`). mlx-whisper
+# hard-depends on torch (~580 MB), which the default Qwen engine never needs.
+whisper = ["mlx-whisper>=0.4.3"]
 
 [project.urls]
 Homepage = "https://github.com/furkanc/parlando"

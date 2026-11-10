@@ -924,11 +924,13 @@ def transcribe(
     supported = model.config.support_languages or []
     supported_lower = {lang.lower(): lang for lang in supported}
     lang_name = supported_lower.get(language.lower(), language)
+    # An empty assistant prefix lets Qwen emit its detected language header.
+    language_prefix = "" if language == "Auto" else f"language {lang_name}<asr_text>"
 
     prompt = (
         f"<|im_start|>system\n{context}<|im_end|>\n"
         f"<|im_start|>user\n<|audio_start|>{'<|audio_pad|>' * num_audio_tokens}<|audio_end|><|im_end|>\n"
-        f"<|im_start|>assistant\nlanguage {lang_name}<asr_text>"
+        f"<|im_start|>assistant\n{language_prefix}"
     )
     input_ids = mx.array(tokenizer.encode(prompt, return_tensors="np"))
 

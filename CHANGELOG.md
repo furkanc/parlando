@@ -1,5 +1,31 @@
 # Changelog
 
+## Unreleased
+
+- Avoid pynput's unused background Carbon keyboard-layout lookup on macOS,
+  which can abort Python in `TSMGetInputSourceProperty`. Apply the workaround
+  to modifier taps, shortcut combinations and the menu's shortcut recorder;
+  pin pynput to the reviewed 1.8.2 implementation.
+- Fix shortcut recording for left Command, Option, Control and Shift taps;
+  preserve the selected side when saving and listening for the shortcut.
+- Capture shortcut keys through the system event tap during menu tracking,
+  with main-thread delivery and cleanup on completion, cancellation or menu close.
+- Add inline clipboard and Enter checkboxes, an editable clipboard duration,
+  and a keyboard shortcut recorder. Suspend dictation hotkeys during shortcut
+  capture; remember menu preferences and use English language-menu labels.
+- Expose automatic language detection in the menu for Whisper and Qwen3-ASR.
+- Add optional local MLX Whisper support (Large-v3) as the `parlando[whisper]`
+  extra, so the default install does not pull in PyTorch; Qwen3-ASR stays the
+  default. Selecting Whisper without the extra fails early with an install
+  hint (before any download) and the menu item is disabled. Switching models frees the previous one, including mlx_whisper's
+  process-wide model cache. The menu bar can switch between Qwen3-ASR and
+  Large-v3 between recordings.
+- Raise the record-mode cap from two to ten minutes, retaining chunked
+  inference and skipping fully silent chunks in long recordings.
+- Copy final dictation to the clipboard for three seconds, then restore all
+  previous clipboard representations unless another copy has replaced it.
+  Restore on normal menu-bar quit; add a menu toggle and `--no-clipboard`.
+
 ## 0.6.1 — 2026-09-10
 
 - Context-echo guard: on quiet audio the ASR could copy the injected

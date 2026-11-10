@@ -31,6 +31,7 @@ Option).
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import plistlib
 import shutil
@@ -47,12 +48,114 @@ LAUNCH_AGENT = Path.home() / "Library" / "LaunchAgents" / f"{BUNDLE_ID}.plist"
 APP_LOG = Path.home() / "Library" / "Logs" / "parlando-app.log"
 
 LANGUAGES = {
-    "Türkçe": "Turkish",
+    "Auto (detect language)": "Auto",
+    "Turkish": "Turkish",
     "English": "English",
 }
 # Superscript badge shown next to the icon when the language is not the
 # default (Config.language).
-LANGUAGE_BADGES = {"Turkish": "ᵗʳ", "English": "ᵉⁿ"}
+LANGUAGE_BADGES = {"Auto": "ᴬ", "Turkish": "ᵗʳ", "English": "ᵉⁿ"}
+
+TAP_SHORTCUTS = {
+    "Left Option": "alt_l",
+    "Left Command": "cmd_l",
+    "Left Control": "ctrl_l",
+    "Left Shift": "shift_l",
+    "Right Option": "alt_r",
+    "Right Command": "cmd_r",
+    "Right Control": "ctrl_r",
+    "Right Shift": "shift_r",
+}
+SETTINGS_FILE = Path.home() / ".config" / "parlando" / "settings.json"
+PREFERENCE_NAMES = ("hotkey", "language", "copy_clipboard", "clipboard_seconds", "send_enter")
+
+
+def parse_hotkey(value: str) -> str:
+    if not isinstance(value, str):
+        raise ValueError("Enter a key combination or a right modifier key.")
+    value = value.strip().lower()
+    for label, key in TAP_SHORTCUTS.items():
+        if value in (label.lower(), key):
+            return key
+    modifiers = {"option": "alt", "alt": "alt", "command": "cmd", "cmd": "cmd",
+                 "control": "ctrl", "ctrl": "ctrl", "shift": "shift"}
+    specials = {"space": "space", "enter": "enter", "return": "enter", "tab": "tab",
+                "escape": "esc", "esc": "esc", "backspace": "backspace",
+                "delete": "delete", "up": "up", "down": "down", "left": "left", "right": "right"}
+    keys = []
+    modifier_count = 0
+    for part in value.split("+"):
+        part = part.strip().removeprefix("<").removesuffix(">")
+        if part in modifiers:
+            keys.append(f"<{modifiers[part]}>")
+            modifier_count += 1
+        elif part in specials:
+            keys.append(f"<{specials[part]}>")
+        elif part.startswith("f") and part[1:].isdigit() and 1 <= int(part[1:]) <= 20:
+            keys.append(f"<{part}>")
+        elif len(part) == 1 and part.isascii() and part.isprintable():
+            keys.append(part)
+        else:
+            raise ValueError("Use a modifier with a key, such as Command+Shift+D, or Right Option.")
+    if modifier_count < 1 or len(keys) - modifier_count != 1 or len(set(keys)) != len(keys):
+        raise ValueError("Use a modifier with one key, such as Command+Shift+D, or Right Option.")
+    return "+".join(keys)
+
+
+def format_hotkey(value: str) -> str:
+    for label, key in TAP_SHORTCUTS.items():
+        if value == key:
+            return label
+    names = {"alt": "Option", "cmd": "Command", "ctrl": "Control"}
+    return " + ".join(names.get(part.strip("<>"), part.strip("<>").title())
+                      for part in value.split("+"))
+
+
+def parse_clipboard_seconds(value) -> float:
+    if isinstance(value, bool):
+        raise ValueError("Enter a number of seconds greater than 0 and at most 3600.")
+    seconds = float(value)
+    if not 0 < seconds <= 3600:
+        raise ValueError("Enter a number of seconds greater than 0 and at most 3600.")
+    return seconds
+
+
+def menu_preferences(cfg: engine.Config) -> dict:
+    return {name: getattr(cfg, name) for name in PREFERENCE_NAMES}
+
+
+def load_menu_config(path: Path = SETTINGS_FILE) -> engine.Config:
+    cfg = engine.Config()
+    try:
+        saved = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return cfg
+    except (OSError, ValueError) as exc:
+        engine.LOGGER.warning("Could not load menu settings: %s", exc)
+        return cfg
+    if not isinstance(saved, dict):
+        return cfg
+    try:
+        cfg.hotkey = parse_hotkey(saved.get("hotkey"))
+    except ValueError:
+        pass
+    if saved.get("language") in LANGUAGES.values():
+        cfg.language = saved["language"]
+    try:
+        cfg.clipboard_seconds = parse_clipboard_seconds(saved.get("clipboard_seconds"))
+    except (TypeError, ValueError):
+        pass
+    for name in ("copy_clipboard", "send_enter"):
+        if type(saved.get(name)) is bool:
+            setattr(cfg, name, saved[name])
+    return cfg
+
+
+def save_menu_config(cfg: engine.Config, path: Path = SETTINGS_FILE) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_suffix(".tmp")
+    temporary.write_text(json.dumps(menu_preferences(cfg), indent=2) + "\n", encoding="utf-8")
+    temporary.replace(path)
 
 # Template icons (black + alpha): macOS recolors them to match the menu bar
 # in light and dark mode. Regenerate with scripts/make_icons.py.
@@ -341,7 +444,7 @@ def _tap_key(eng) -> str:
     key = eng.cfg.hotkey
     if not key:
         return ""
-    return engine.TAP_KEY_LABELS.get(key, key)
+    return engine.TAP_KEY_LABELS.get(key, format_hotkey(key))
 
 
 def describe_status(eng) -> dict:
@@ -429,6 +532,8 @@ def describe_status(eng) -> dict:
 def run_menubar() -> int:
     import rumps
 
+    from parlando.menu_controls import MenuControls
+
     engine_holder: dict = {"engine": None}
 
     class ParlandoApp(rumps.App):
@@ -442,6 +547,7 @@ def run_menubar() -> int:
             )
             self._icon_state = "idle"
             self._ax_alerted = False
+            self._saved_preferences = None
             self._guard = RelaunchGuard(app_bundle_path())
             self._guard.cleanup()
             # Status block: two text lines (disabled items) and an action
@@ -454,12 +560,30 @@ def run_menubar() -> int:
                 "Start recording", callback=self.on_toggle
             )
             self.enter_item = rumps.MenuItem(
-                "Press Enter after each utterance", callback=self.on_enter_mode
+                "Press Enter after each utterance", callback=lambda _item: None
             )
             self.lang_items = {
                 asr_name: rumps.MenuItem(label, callback=self.on_language)
                 for label, asr_name in LANGUAGES.items()
             }
+            # Whisper is an optional extra; without it the item stays visible
+            # but disabled, and says how to install it.
+            self.model_available = {
+                model: "whisper" not in model.lower() or engine.whisper_available()
+                for model in engine.SPEECH_MODELS.values()
+            }
+            self.model_items = {
+                model: rumps.MenuItem(
+                    label if self.model_available[model]
+                    else f"{label} (needs parlando[whisper])",
+                    callback=self.on_model,
+                )
+                for label, model in engine.SPEECH_MODELS.items()
+            }
+            self.clipboard_item = rumps.MenuItem(
+                "Copy to clipboard", callback=lambda _item: None
+            )
+            self.hotkey_item = rumps.MenuItem("Change hotkey", callback=lambda _item: None)
             self.menu = [
                 self.status_item,
                 self.detail_item,
@@ -467,6 +591,9 @@ def run_menubar() -> int:
                 None,
                 self.toggle_item,
                 self.enter_item,
+                self.clipboard_item,
+                self.hotkey_item,
+                {"Speech model": list(self.model_items.values())},
                 {"Language": list(self.lang_items.values())},
                 {"Vocabulary": [
                     rumps.MenuItem("Add Term…", callback=self.on_vocab_add),
@@ -478,6 +605,9 @@ def run_menubar() -> int:
                 rumps.MenuItem("Open log file", callback=self.on_log),
                 rumps.MenuItem("Quit", callback=self.on_quit),
             ]
+            self.controls = MenuControls.alloc().init()
+            self.controls.get_engine = lambda: engine_holder.get("engine")
+            self.controls.attach(self.enter_item, self.clipboard_item, self.hotkey_item, self.menu._menu)
             self._set_hidden(self.action_item, True)
             self._set_hidden(self.detail_item, True)
             # UI updates must happen on the main thread: polling engine state
@@ -523,6 +653,19 @@ def run_menubar() -> int:
                 )
             for lang, item in self.lang_items.items():
                 item.state = int(eng.cfg.language == lang)
+            can_switch = eng.status.phase in ("ready", "paused")
+            self.controls.refresh()
+            preferences = menu_preferences(eng.cfg)
+            if preferences != self._saved_preferences:
+                try:
+                    save_menu_config(eng.cfg)
+                except OSError as exc:
+                    engine.LOGGER.warning("Could not save menu settings: %s", exc)
+                self._saved_preferences = preferences
+            for model, item in self.model_items.items():
+                item.state = int(eng.cfg.model == model)
+                usable = can_switch and self.model_available[model]
+                item.set_callback(self.on_model if usable else None)
 
             view = describe_status(eng)
             if self.title != view["badge"]:
@@ -551,12 +694,6 @@ def run_menubar() -> int:
             if eng:
                 eng.request_toggle()
 
-        def on_enter_mode(self, item) -> None:
-            eng = engine_holder["engine"]
-            if eng:
-                eng.cfg.send_enter = not eng.cfg.send_enter
-                item.state = eng.cfg.send_enter
-
         def on_language(self, item) -> None:
             eng = engine_holder.get("engine")
             if not eng:
@@ -568,6 +705,14 @@ def run_menubar() -> int:
                     eng.cfg.language = lang
                     engine.LOGGER.info("language changed: %s", lang)
                     break
+
+        def on_model(self, item) -> None:
+            eng = engine_holder.get("engine")
+            if eng:
+                for model, menu_item in self.model_items.items():
+                    if menu_item is item:
+                        eng.request_model(model)
+                        break
 
         def on_vocab_add(self, _item) -> None:
             # NOT rumps.Window: in an accessory (menu bar) app its modal can
@@ -620,6 +765,11 @@ def run_menubar() -> int:
             subprocess.run(["open", str(engine.LOG_PATH)], check=False)
 
         def on_quit(self, _item) -> None:
+            self.controls.end_capture()
+            self.controls.save()
+            eng = engine_holder.get("engine")
+            if eng and eng.clipboard is not None:
+                eng.clipboard.restore()
             self._guard.stop()
             rumps.quit_application()
 
@@ -627,7 +777,7 @@ def run_menubar() -> int:
 
     def engine_thread() -> None:
         engine._setup_logging()
-        eng = engine.DictationEngine(engine.Config())
+        eng = engine.DictationEngine(load_menu_config())
         engine_holder["engine"] = eng
         try:
             asyncio.run(eng.run())
