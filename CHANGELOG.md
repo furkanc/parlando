@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.7.0 — 2026-11-10
 
 - Avoid pynput's unused background Carbon keyboard-layout lookup on macOS,
   which can abort Python in `TSMGetInputSourceProperty`. Apply the workaround
